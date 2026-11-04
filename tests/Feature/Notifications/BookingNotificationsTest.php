@@ -29,9 +29,9 @@ class BookingNotificationsTest extends TestCase
 
         $html = (string) (new BookingConfirmed($booking))->toMail($booking->customer)->render();
 
-        $this->assertStringContainsString('Taglio with Giulia Rossi', $html);
-        $this->assertStringContainsString('When: 15/03/2027 10:00', $html);
-        $this->assertStringContainsString('You can cancel for free until 14/03/2027 10:00.', $html);
+        $this->assertStringContainsString('Taglio con Giulia Rossi', $html);
+        $this->assertStringContainsString('Quando: 15/03/2027 10:00', $html);
+        $this->assertStringContainsString('Puoi annullare gratuitamente fino al 14/03/2027 10:00.', $html);
     }
 
     public function test_reminder_is_not_sent_once_the_booking_is_cancelled(): void

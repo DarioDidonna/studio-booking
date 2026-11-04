@@ -130,7 +130,7 @@ class EditOperatorTest extends TestCase
             ->set('offEndsAt', '2027-08-16T00:00')
             ->call('addTimeOff')
             ->assertDispatched('toast-show', fn (string $event, array $params): bool => $params['dataset']['variant'] === 'warning'
-                && str_contains($params['slots']['text'], 'One booking falls in this period'));
+                && str_contains($params['slots']['text'], 'Una prenotazione cade in questo periodo'));
 
         $this->assertModelExists($booking);
     }

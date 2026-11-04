@@ -12,6 +12,7 @@ use Flux\Flux;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
@@ -151,7 +152,7 @@ class Agenda extends Component
         }
 
         unset($this->bookings);
-        Flux::toast(variant: 'success', text: __('Marked as :status.', ['status' => $updated->status->label()]));
+        Flux::toast(variant: 'success', text: __('Marked as :status.', ['status' => Str::lower($updated->status->label())]));
     }
 
     private function today(): CarbonImmutable
