@@ -1,5 +1,7 @@
 # Studio Booking
 
+[![Tests](https://github.com/DarioDidonna/studio-booking/actions/workflows/tests.yml/badge.svg)](https://github.com/DarioDidonna/studio-booking/actions/workflows/tests.yml)
+
 [Leggi in italiano](README.it.md)
 
 A booking system for a studio with services and operators (hair salon, physiotherapist, gym with trainers). Customers book a free time online, staff see their agenda, and the admin manages the catalogue, the working hours and the holidays.

@@ -1,5 +1,7 @@
 # Studio Booking
 
+[![Tests](https://github.com/DarioDidonna/studio-booking/actions/workflows/tests.yml/badge.svg)](https://github.com/DarioDidonna/studio-booking/actions/workflows/tests.yml)
+
 [Read in English](README.md)
 
 Un sistema di prenotazioni per uno studio con servizi e operatori (parrucchiere, fisioterapista, palestra con istruttori). Il cliente prenota online un orario libero, lo staff vede la propria agenda, l'admin gestisce listino, orari di lavoro e ferie.
