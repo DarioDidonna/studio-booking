@@ -45,7 +45,7 @@
                         <flux:table.cell>
                             <flux:link :href="route('agenda', ['operator' => $booking->operator_id, 'date' => $today->toDateString()])" wire:navigate>{{ $booking->operator->name }}</flux:link>
                         </flux:table.cell>
-                        <flux:table.cell>{{ $booking->customer->name }}</flux:table.cell>
+                        <flux:table.cell>{{ $booking->customer->name ?? __('Deleted customer') }}</flux:table.cell>
                         <flux:table.cell>{{ $booking->service->name }}</flux:table.cell>
                         <flux:table.cell class="py-0"><x-booking-status-badge :status="$booking->status" /></flux:table.cell>
                     </flux:table.row>

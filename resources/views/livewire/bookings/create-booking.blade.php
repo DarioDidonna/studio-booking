@@ -37,6 +37,7 @@
                     type="date"
                     :label="__('Day')"
                     :min="now()->setTimezone(config('app.business_timezone'))->toDateString()"
+                    :max="now()->setTimezone(config('app.business_timezone'))->addDays(\App\Models\Booking::BOOKING_HORIZON_DAYS)->toDateString()"
                 />
             </div>
         @endif

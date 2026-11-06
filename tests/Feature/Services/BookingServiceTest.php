@@ -8,6 +8,7 @@ use App\Exceptions\BookingNotStartedException;
 use App\Exceptions\CancellationWindowClosedException;
 use App\Exceptions\InvalidBookingTransitionException;
 use App\Exceptions\SlotNotAvailableException;
+use App\Exceptions\TooManyOpenBookingsException;
 use App\Models\Booking;
 use App\Models\Operator;
 use App\Models\Service;
@@ -102,6 +103,47 @@ class BookingServiceTest extends TestCase
         $this->expectException(SlotNotAvailableException::class);
 
         app(BookingService::class)->book($customer, $operator, $service, $this->mondayAt('07:00'), $customer);
+    }
+
+    public function test_cancelled_and_past_bookings_do_not_count_towards_the_limit(): void
+    {
+        [$operator, $service] = $this->operatorOffering(durationMinutes: 60);
+        $customer = User::factory()->create();
+        Booking::factory()->count(Booking::MAX_UPCOMING_PER_CUSTOMER - 1)->for($customer, 'customer')->confirmed()->create();
+        Booking::factory()->for($customer, 'customer')->cancelled()->create();
+        Booking::factory()->for($customer, 'customer')->completed()->create([
+            'starts_at' => CarbonImmutable::parse('2027-02-01 09:00', 'UTC'),
+            'ends_at' => CarbonImmutable::parse('2027-02-01 10:00', 'UTC'),
+        ]);
+
+        app(BookingService::class)->book($customer, $operator, $service, $this->mondayAt('10:00'), $customer);
+
+        $this->assertSame(Booking::MAX_UPCOMING_PER_CUSTOMER, $customer->bookings()->where('status', BookingStatus::Confirmed)->count());
+    }
+
+    public function test_customer_cannot_hold_more_than_the_maximum_upcoming_bookings(): void
+    {
+        [$operator, $service] = $this->operatorOffering(durationMinutes: 60);
+        $customer = User::factory()->create();
+        Booking::factory()->count(Booking::MAX_UPCOMING_PER_CUSTOMER)->for($customer, 'customer')->confirmed()->create();
+
+        try {
+            app(BookingService::class)->book($customer, $operator, $service, $this->mondayAt('10:00'), $customer);
+            $this->fail('The booking over the limit was accepted.');
+        } catch (TooManyOpenBookingsException) {
+            $this->assertDatabaseMissing('bookings', ['operator_id' => $operator->id]);
+        }
+    }
+
+    public function test_admin_booking_at_the_desk_is_not_limited(): void
+    {
+        [$operator, $service] = $this->operatorOffering(durationMinutes: 60);
+        $customer = User::factory()->create();
+        Booking::factory()->count(Booking::MAX_UPCOMING_PER_CUSTOMER)->for($customer, 'customer')->confirmed()->create();
+
+        app(BookingService::class)->book($customer, $operator, $service, $this->mondayAt('10:00'), User::factory()->admin()->create());
+
+        $this->assertDatabaseHas('bookings', ['operator_id' => $operator->id, 'customer_id' => $customer->id]);
     }
 
     public function test_customer_cancels_for_free_until_the_window_closes(): void

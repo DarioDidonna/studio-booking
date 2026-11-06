@@ -3,6 +3,7 @@
 namespace Tests\Feature\Settings;
 
 use App\Livewire\Settings\Profile;
+use App\Models\Booking;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -71,6 +72,51 @@ class ProfileUpdateTest extends TestCase
 
         $this->assertNull($user->fresh());
         $this->assertFalse(auth()->check());
+    }
+
+    public function test_deleted_customer_leaves_past_bookings_anonymized(): void
+    {
+        $user = User::factory()->create();
+        $pastBooking = Booking::factory()->for($user, 'customer')->completed()->create([
+            'starts_at' => now()->subWeek(),
+            'ends_at' => now()->subWeek()->addHour(),
+        ]);
+
+        Livewire::actingAs($user)
+            ->test('settings.delete-user-form')
+            ->set('password', 'password')
+            ->call('deleteUser')
+            ->assertHasNoErrors();
+
+        $this->assertNull($user->fresh());
+        $this->assertDatabaseHas('bookings', ['id' => $pastBooking->id, 'customer_id' => null]);
+    }
+
+    public function test_customer_with_upcoming_bookings_must_cancel_them_before_deleting_the_account(): void
+    {
+        $user = User::factory()->create();
+        Booking::factory()->for($user, 'customer')->confirmed()->create();
+
+        Livewire::actingAs($user)
+            ->test('settings.delete-user-form')
+            ->set('password', 'password')
+            ->call('deleteUser')
+            ->assertHasErrors('account');
+
+        $this->assertNotNull($user->fresh());
+    }
+
+    public function test_admin_cannot_delete_their_own_account(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        Livewire::actingAs($admin)
+            ->test('settings.delete-user-form')
+            ->set('password', 'password')
+            ->call('deleteUser')
+            ->assertHasErrors('account');
+
+        $this->assertNotNull($admin->fresh());
     }
 
     public function test_correct_password_must_be_provided_to_delete_account(): void

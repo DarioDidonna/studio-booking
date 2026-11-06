@@ -37,7 +37,7 @@ class SendBookingReminders extends Command
                         ->update(['reminder_sent_at' => $now]);
 
                     if ($claimed === 1) {
-                        $booking->customer->notify(new BookingReminder($booking));
+                        $booking->customer?->notify(new BookingReminder($booking));
                         $sent++;
                     }
                 }

@@ -22,6 +22,8 @@
 
             <flux:input wire:model="password" :label="__('Password')" type="password" viewable />
 
+            <flux:error name="account" />
+
             <div class="flex justify-end space-x-2 rtl:space-x-reverse">
                 <flux:modal.close>
                     <flux:button variant="filled">{{ __('Cancel') }}</flux:button>

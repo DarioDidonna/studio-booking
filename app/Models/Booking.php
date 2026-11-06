@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property int $id
- * @property int $customer_id
+ * @property int|null $customer_id Null once the customer has deleted their account.
  * @property int $operator_id
  * @property int $service_id
  * @property CarbonImmutable $starts_at
@@ -45,6 +45,16 @@ class Booking extends Model
      * How long before the start the customer is reminded.
      */
     public const REMINDER_HOURS = 24;
+
+    /**
+     * How many upcoming bookings a customer may hold at once, so nobody can fill the agenda.
+     */
+    public const MAX_UPCOMING_PER_CUSTOMER = 3;
+
+    /**
+     * How many days ahead the agenda is open for booking.
+     */
+    public const BOOKING_HORIZON_DAYS = 60;
 
     /**
      * @var array<string, mixed>

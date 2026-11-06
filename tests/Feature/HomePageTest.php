@@ -23,6 +23,14 @@ class HomePageTest extends TestCase
             ->assertSee('20,00');
     }
 
+    public function test_pages_cannot_be_framed_by_other_sites(): void
+    {
+        $this->get(route('home'))
+            ->assertHeader('X-Frame-Options', 'DENY')
+            ->assertHeader('Content-Security-Policy', "frame-ancestors 'none'")
+            ->assertHeader('X-Content-Type-Options', 'nosniff');
+    }
+
     public function test_hides_inactive_services(): void
     {
         Service::factory()->inactive()->create(['name' => 'Servizio sospeso']);

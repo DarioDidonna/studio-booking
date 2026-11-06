@@ -4,6 +4,7 @@ namespace App\Livewire\Bookings;
 
 use App\Enums\UserRole;
 use App\Exceptions\SlotNotAvailableException;
+use App\Exceptions\TooManyOpenBookingsException;
 use App\Models\Booking;
 use App\Models\Operator;
 use App\Models\Service;
@@ -192,6 +193,10 @@ class CreateBooking extends Component
         } catch (SlotNotAvailableException $exception) {
             $this->reset('slot');
             unset($this->availableSlots);
+            $this->addError('slot', $exception->getMessage());
+
+            return;
+        } catch (TooManyOpenBookingsException $exception) {
             $this->addError('slot', $exception->getMessage());
 
             return;

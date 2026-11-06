@@ -120,6 +120,14 @@ class AvailabilityServiceTest extends TestCase
         $this->assertSame(['10:15', '10:30'], $slots);
     }
 
+    public function test_agenda_opens_only_a_limited_number_of_days_ahead(): void
+    {
+        [$operator, $service] = $this->operatorOffering(durationMinutes: 60, from: '09:00', to: '10:00');
+
+        $this->assertSame(['09:00'], $this->slots($operator, $service, '2027-04-26'));
+        $this->assertSame([], $this->slots($operator, $service, '2027-05-03'));
+    }
+
     public function test_keeps_local_working_hours_across_the_daylight_saving_change(): void
     {
         [$operator, $service] = $this->operatorOffering(durationMinutes: 60, from: '09:00', to: '10:00');

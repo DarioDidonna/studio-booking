@@ -40,7 +40,7 @@
                         {{ $booking->localStartsAt()->format('H:i') }}–{{ $booking->ends_at->setTimezone(config('app.business_timezone'))->format('H:i') }}
                     </flux:table.cell>
                     <flux:table.cell>
-                        <div>{{ $booking->customer->name }}</div>
+                        <div>{{ $booking->customer->name ?? __('Deleted customer') }}</div>
                         @if ($booking->notes)
                             <flux:text size="sm" class="max-w-xs truncate">{{ $booking->notes }}</flux:text>
                         @endif

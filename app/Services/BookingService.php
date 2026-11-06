@@ -7,6 +7,7 @@ use App\Exceptions\BookingNotStartedException;
 use App\Exceptions\CancellationWindowClosedException;
 use App\Exceptions\InvalidBookingTransitionException;
 use App\Exceptions\SlotNotAvailableException;
+use App\Exceptions\TooManyOpenBookingsException;
 use App\Models\Booking;
 use App\Models\Operator;
 use App\Models\Service;
@@ -35,12 +36,28 @@ class BookingService
      * operator, so the availability check and the insert act as one step.
      * Bookings for different operators do not wait for each other.
      *
+     * Customers booking for themselves may hold only a few upcoming bookings;
+     * their row is locked too, so two parallel requests cannot both pass the
+     * limit. Admins booking at the desk are not limited.
+     *
      * @throws SlotNotAvailableException
+     * @throws TooManyOpenBookingsException
      */
     public function book(User $customer, Operator $operator, Service $service, CarbonImmutable $startsAt, User $bookedBy, ?string $notes = null): Booking
     {
         return DB::transaction(function () use ($customer, $operator, $service, $startsAt, $bookedBy, $notes): Booking {
+            // Locks first, plain reads after: on MySQL the transaction's snapshot is taken at
+            // the first plain read, which must already see bookings committed while we waited.
+            // The order is always operator then customer, so two requests cannot deadlock.
             $lockedOperator = Operator::query()->whereKey($operator->id)->lockForUpdate()->firstOrFail();
+
+            if (! $bookedBy->isAdmin()) {
+                User::query()->whereKey($customer->id)->lockForUpdate()->firstOrFail();
+
+                if ($this->upcomingBookingsCount($customer) >= Booking::MAX_UPCOMING_PER_CUSTOMER) {
+                    throw new TooManyOpenBookingsException;
+                }
+            }
 
             if (! $this->isFreeSlot($lockedOperator, $service, $startsAt)) {
                 throw new SlotNotAvailableException;
@@ -86,7 +103,7 @@ class BookingService
         }
 
         $cancelled = $this->transition($booking, BookingStatus::Cancelled, $cancelledBy);
-        $cancelled->customer->notify(new BookingCancelled($cancelled));
+        $cancelled->customer?->notify(new BookingCancelled($cancelled));
 
         return $cancelled;
     }
@@ -123,6 +140,14 @@ class BookingService
         if ($booking->starts_at->isFuture()) {
             throw new BookingNotStartedException;
         }
+    }
+
+    private function upcomingBookingsCount(User $customer): int
+    {
+        return $customer->bookings()
+            ->whereIn('status', BookingStatus::slotOccupyingCases())
+            ->where('starts_at', '>', Date::now())
+            ->count();
     }
 
     private function isFreeSlot(Operator $operator, Service $service, CarbonImmutable $startsAt): bool

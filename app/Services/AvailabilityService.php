@@ -30,12 +30,13 @@ class AvailabilityService
      */
     public function availableSlots(Operator $operator, Service $service, string $date): Collection
     {
-        if (! $this->canPerform($operator, $service)) {
+        $timezone = config('app.business_timezone');
+        $dayStart = CarbonImmutable::createFromFormat('!Y-m-d', $date, $timezone);
+
+        if (! $this->canPerform($operator, $service) || $this->isBeyondHorizon($dayStart)) {
             return collect();
         }
 
-        $timezone = config('app.business_timezone');
-        $dayStart = CarbonImmutable::createFromFormat('!Y-m-d', $date, $timezone);
         $dayEnd = $dayStart->addDay();
         $busyIntervals = $this->busyIntervals($operator, $dayStart->utc(), $dayEnd->utc());
         $earliestStart = Date::now()->utc();
@@ -53,6 +54,16 @@ class AvailabilityService
             ->unique(fn (CarbonImmutable $start): int => $start->getTimestamp())
             ->sortBy(fn (CarbonImmutable $start): int => $start->getTimestamp())
             ->values();
+    }
+
+    /**
+     * The agenda opens Booking::BOOKING_HORIZON_DAYS days ahead, counted in local days.
+     */
+    private function isBeyondHorizon(CarbonImmutable $dayStart): bool
+    {
+        $lastBookableDay = Date::now()->setTimezone($dayStart->getTimezone())->startOfDay()->addDays(Booking::BOOKING_HORIZON_DAYS);
+
+        return $dayStart->greaterThan($lastBookableDay);
     }
 
     private function canPerform(Operator $operator, Service $service): bool

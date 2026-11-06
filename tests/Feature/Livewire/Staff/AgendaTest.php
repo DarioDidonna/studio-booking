@@ -57,6 +57,17 @@ class AgendaTest extends TestCase
             ->assertDontSee('Other Operator Customer');
     }
 
+    public function test_bookings_of_deleted_customers_stay_in_the_agenda(): void
+    {
+        $operator = Operator::factory()->withStaffAccount()->create();
+        $booking = $this->bookingFor($operator, '2027-03-15 08:00', 'Gone Customer');
+        $booking->customer->delete();
+
+        Livewire::actingAs($operator->user)
+            ->test(Agenda::class)
+            ->assertSee('Cliente eliminato');
+    }
+
     public function test_staff_cannot_open_another_operators_agenda(): void
     {
         $operator = Operator::factory()->withStaffAccount()->create();
