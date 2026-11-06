@@ -7,6 +7,8 @@ use App\Enums\BookingStatus;
 use Carbon\CarbonImmutable;
 use Database\Factories\BookingFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -80,6 +82,18 @@ class Booking extends Model
     public function freeCancellationEndsAt(): CarbonImmutable
     {
         return $this->starts_at->subHours(self::FREE_CANCELLATION_HOURS);
+    }
+
+    /**
+     * Bookings starting in [from, to). Times are converted to UTC first,
+     * because the database stores them without a timezone.
+     *
+     * @param  Builder<self>  $query
+     */
+    #[Scope]
+    protected function whereBetweenStarts(Builder $query, CarbonImmutable $from, CarbonImmutable $to): void
+    {
+        $query->where('starts_at', '>=', $from->utc())->where('starts_at', '<', $to->utc());
     }
 
     /**
