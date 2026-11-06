@@ -73,9 +73,17 @@ class CreateBooking extends Component
         return User::query()->where('role', UserRole::Customer)->orderBy('name')->get(['id', 'name', 'email']);
     }
 
+    /**
+     * The previous operator may not offer the new service. When only one does, there is nothing to choose.
+     */
     public function updatedServiceId(): void
     {
         $this->reset('operatorId', 'slot');
+        unset($this->operators);
+
+        if ($this->operators->count() === 1) {
+            $this->operatorId = $this->operators->first()->id;
+        }
     }
 
     public function updatedOperatorId(): void

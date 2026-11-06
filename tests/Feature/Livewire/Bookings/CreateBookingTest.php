@@ -62,6 +62,22 @@ class CreateBookingTest extends TestCase
             ->assertDontSee('10:00');
     }
 
+    public function test_highlights_the_chosen_time(): void
+    {
+        [$operator, $service] = $this->operatorOffering();
+
+        $html = Livewire::actingAs(User::factory()->create())
+            ->test(CreateBooking::class)
+            ->set('serviceId', $service->id)
+            ->set('operatorId', $operator->id)
+            ->set('date', '2027-03-15')
+            ->set('slot', '2027-03-15 08:30:00')
+            ->html();
+
+        $this->assertSame(1, substr_count($html, 'aria-pressed="true"'));
+        $this->assertMatchesRegularExpression('/wire:key="slot-2027-03-15 08:30:00"[^>]*aria-pressed="true"/', $html);
+    }
+
     public function test_customer_books_a_free_time_and_is_sent_to_their_bookings(): void
     {
         [$operator, $service] = $this->operatorOffering();
@@ -108,6 +124,54 @@ class CreateBookingTest extends TestCase
             ->assertNoRedirect();
 
         $this->assertDatabaseMissing('bookings', ['customer_id' => $customer->id]);
+    }
+
+    public function test_changing_service_clears_the_operator_when_several_offer_it(): void
+    {
+        [$firstOperator, $firstService] = $this->operatorOffering();
+        [, $secondService] = $this->operatorOffering();
+        $secondService->operators()->attach($firstOperator);
+
+        Livewire::actingAs(User::factory()->create())
+            ->test(CreateBooking::class)
+            ->set('serviceId', $firstService->id)
+            ->set('operatorId', $firstOperator->id)
+            ->set('serviceId', $secondService->id)
+            ->assertSet('operatorId', null);
+    }
+
+    public function test_changing_service_picks_the_only_operator_who_offers_it(): void
+    {
+        [$firstOperator, $firstService] = $this->operatorOffering();
+        [$secondOperator, $secondService] = $this->operatorOffering();
+
+        Livewire::actingAs(User::factory()->create())
+            ->test(CreateBooking::class)
+            ->set('serviceId', $firstService->id)
+            ->set('operatorId', $firstOperator->id)
+            ->set('serviceId', $secondService->id)
+            ->assertSet('operatorId', $secondOperator->id)
+            ->set('date', '2027-03-15')
+            ->assertSee('09:30');
+    }
+
+    public function test_tells_the_customer_when_they_hold_too_many_upcoming_bookings(): void
+    {
+        [$operator, $service] = $this->operatorOffering();
+        $customer = User::factory()->create();
+        Booking::factory()->count(Booking::MAX_UPCOMING_PER_CUSTOMER)->for($customer, 'customer')->confirmed()->create();
+
+        Livewire::actingAs($customer)
+            ->test(CreateBooking::class)
+            ->set('serviceId', $service->id)
+            ->set('operatorId', $operator->id)
+            ->set('date', '2027-03-15')
+            ->set('slot', '2027-03-15 08:30:00')
+            ->call('book')
+            ->assertHasErrors('slot')
+            ->assertNoRedirect();
+
+        $this->assertDatabaseMissing('bookings', ['operator_id' => $operator->id]);
     }
 
     public function test_rejects_an_operator_who_does_not_offer_the_service(): void

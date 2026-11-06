@@ -25,7 +25,8 @@
 
         @if ($this->selectedService)
             <div class="grid gap-6 sm:grid-cols-2">
-                <flux:select wire:model.live="operatorId" :label="__('With')" :placeholder="__('Choose who…')">
+                {{-- Keyed by service: a reused <select> would keep showing the operator of the previous service. --}}
+                <flux:select wire:key="operator-select-{{ $serviceId }}" wire:model.live="operatorId" :label="__('With')" :placeholder="__('Choose who…')">
                     @foreach ($this->operators as $operator)
                         <flux:select.option wire:key="operator-{{ $operator->id }}" :value="$operator->id">{{ $operator->name }}</flux:select.option>
                     @endforeach
@@ -47,10 +48,14 @@
                 <div class="grid grid-cols-3 gap-2 sm:grid-cols-6" wire:loading.class="opacity-50" wire:target="operatorId,date">
                     @forelse ($this->availableSlots as $availableSlot)
                         @php($value = $availableSlot->toDateTimeString())
+                        {{-- $this->slot, not $slot: inside a component Blade's $slot is the component's content. --}}
+                        @php($isSelected = $this->slot === $value)
                         <flux:button
                             wire:key="slot-{{ $value }}"
                             wire:click="$set('slot', '{{ $value }}')"
-                            :variant="$slot === $value ? 'primary' : 'outline'"
+                            :variant="$isSelected ? 'primary' : 'outline'"
+                            :icon="$isSelected ? 'check' : null"
+                            :aria-pressed="$isSelected ? 'true' : 'false'"
                             size="sm"
                             type="button"
                         >
