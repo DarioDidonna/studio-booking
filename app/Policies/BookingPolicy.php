@@ -6,6 +6,7 @@ use App\Enums\BookingStatus;
 use App\Enums\UserRole;
 use App\Models\Booking;
 use App\Models\User;
+use Illuminate\Support\Facades\Date;
 
 class BookingPolicy
 {
@@ -34,6 +35,23 @@ class BookingPolicy
         }
 
         return $user->isAdmin() || $this->isOwner($user, $booking);
+    }
+
+    /**
+     * Only open, upcoming bookings can be moved: by an admin at any time, by
+     * their customer within the free change window.
+     */
+    public function reschedule(User $user, Booking $booking): bool
+    {
+        if (! $booking->status->occupiesSlot() || $booking->starts_at->isPast()) {
+            return false;
+        }
+
+        if ($user->isAdmin()) {
+            return true;
+        }
+
+        return $this->isOwner($user, $booking) && Date::now()->lessThan($booking->freeCancellationEndsAt());
     }
 
     /**

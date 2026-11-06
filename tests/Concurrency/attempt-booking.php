@@ -12,6 +12,7 @@
  */
 
 use App\Exceptions\SlotNotAvailableException;
+use App\Models\Booking;
 use App\Models\Operator;
 use App\Models\Service;
 use App\Models\User;
@@ -28,9 +29,9 @@ $app->make(Kernel::class)->bootstrap();
 
 $app->bind(AvailabilityService::class, fn () => new class extends AvailabilityService
 {
-    public function availableSlots(Operator $operator, Service $service, string $date): Collection
+    public function availableSlots(Operator $operator, Service $service, string $date, ?Booking $ignoring = null): Collection
     {
-        $slots = parent::availableSlots($operator, $service, $date);
+        $slots = parent::availableSlots($operator, $service, $date, $ignoring);
 
         usleep(700_000);
 

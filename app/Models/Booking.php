@@ -57,6 +57,11 @@ class Booking extends Model
     public const BOOKING_HORIZON_DAYS = 60;
 
     /**
+     * After this many no-shows a customer can no longer book online.
+     */
+    public const NO_SHOW_LIMIT = 3;
+
+    /**
      * @var array<string, mixed>
      */
     protected $attributes = [

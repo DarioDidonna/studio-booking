@@ -20,6 +20,10 @@
                     <x-booking-status-badge :status="$booking->status" />
 
                     @if (now()->lessThan($booking->freeCancellationEndsAt()) && auth()->user()->can('cancel', $booking))
+                        @can('reschedule', $booking)
+                            <flux:button size="sm" variant="ghost" :href="route('bookings.reschedule', $booking)" wire:navigate>{{ __('Move') }}</flux:button>
+                        @endcan
+
                         <flux:modal.trigger name="cancel-booking-{{ $booking->id }}">
                             <flux:button size="sm" variant="ghost">{{ __('Cancel') }}</flux:button>
                         </flux:modal.trigger>

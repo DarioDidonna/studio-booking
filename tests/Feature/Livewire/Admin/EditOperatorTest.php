@@ -2,14 +2,17 @@
 
 namespace Tests\Feature\Livewire\Admin;
 
+use App\Enums\BookingStatus;
 use App\Enums\Weekday;
 use App\Livewire\Admin\EditOperator;
 use App\Models\Booking;
 use App\Models\Operator;
 use App\Models\Service;
 use App\Models\User;
+use App\Notifications\BookingCancelled;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -114,14 +117,19 @@ class EditOperatorTest extends TestCase
         ]);
     }
 
-    public function test_warns_about_bookings_that_fall_in_new_time_off(): void
+    public function test_new_time_off_cancels_the_bookings_it_covers_and_tells_their_customers_why(): void
     {
+        Notification::fake();
         config(['app.business_timezone' => 'Europe/Rome']);
         $this->travelTo(CarbonImmutable::parse('2027-07-01 12:00', 'UTC'));
-        $operator = Operator::factory()->create();
-        $booking = Booking::factory()->for($operator)->confirmed()->create([
+        $operator = Operator::factory()->create(['name' => 'Marco Bianchi']);
+        $covered = Booking::factory()->for($operator)->confirmed()->create([
             'starts_at' => CarbonImmutable::parse('2027-08-10 08:00', 'UTC'),
             'ends_at' => CarbonImmutable::parse('2027-08-10 09:00', 'UTC'),
+        ]);
+        $outside = Booking::factory()->for($operator)->confirmed()->create([
+            'starts_at' => CarbonImmutable::parse('2027-08-20 08:00', 'UTC'),
+            'ends_at' => CarbonImmutable::parse('2027-08-20 09:00', 'UTC'),
         ]);
 
         Livewire::actingAs(User::factory()->admin()->create())
@@ -130,8 +138,11 @@ class EditOperatorTest extends TestCase
             ->set('offEndsAt', '2027-08-16T00:00')
             ->call('addTimeOff')
             ->assertDispatched('toast-show', fn (string $event, array $params): bool => $params['dataset']['variant'] === 'warning'
-                && str_contains($params['slots']['text'], 'Una prenotazione cade in questo periodo'));
+                && str_contains($params['slots']['text'], 'Una prenotazione è stata annullata'));
 
-        $this->assertModelExists($booking);
+        $this->assertSame(BookingStatus::Cancelled, $covered->fresh()->status);
+        $this->assertSame(BookingStatus::Confirmed, $outside->fresh()->status);
+        Notification::assertSentTo($covered->customer, BookingCancelled::class, fn (BookingCancelled $notification): bool => $notification->reason === 'Marco Bianchi non sarà disponibile in quel giorno.');
+        Notification::assertNotSentTo($outside->customer, BookingCancelled::class);
     }
 }

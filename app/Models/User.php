@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\BookingStatus;
 use App\Enums\UserRole;
 use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
@@ -25,6 +26,7 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * @property CarbonImmutable|null $email_verified_at
  * @property string $password
  * @property UserRole $role
+ * @property CarbonImmutable|null $no_shows_cleared_at
  * @property string|null $two_factor_secret
  * @property string|null $two_factor_recovery_codes
  * @property CarbonImmutable|null $two_factor_confirmed_at
@@ -59,6 +61,7 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'role' => UserRole::class,
+            'no_shows_cleared_at' => 'datetime',
         ];
     }
 
@@ -90,6 +93,26 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
     public function bookings(): HasMany
     {
         return $this->hasMany(Booking::class, 'customer_id');
+    }
+
+    /**
+     * No-shows recorded since an admin last cleared them; older ones are forgiven.
+     * No-show is a final status, so updated_at is when it was recorded.
+     */
+    public function recentNoShowsCount(): int
+    {
+        return $this->bookings()
+            ->where('status', BookingStatus::NoShow)
+            ->when($this->no_shows_cleared_at, fn ($query, CarbonImmutable $clearedAt) => $query->where('updated_at', '>', $clearedAt))
+            ->count();
+    }
+
+    /**
+     * After too many no-shows a customer can only book through the barbershop.
+     */
+    public function isBlockedForNoShows(): bool
+    {
+        return $this->recentNoShowsCount() >= Booking::NO_SHOW_LIMIT;
     }
 
     /**

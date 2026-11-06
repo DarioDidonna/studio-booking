@@ -67,7 +67,7 @@
     <div class="space-y-4">
         <div>
             <flux:heading size="lg" level="2">{{ __('Time off and closures') }}</flux:heading>
-            <flux:text class="mt-1">{{ __('No new bookings can be made in these periods.') }}</flux:text>
+            <flux:text class="mt-1">{{ __('No new bookings can be made in these periods. Existing bookings are cancelled and their customers notified by email.') }}</flux:text>
         </div>
 
         <div class="space-y-2">

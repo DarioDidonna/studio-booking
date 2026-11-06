@@ -10,6 +10,7 @@ use App\Models\Service;
 use App\Models\TimeOff;
 use App\Models\WorkingHour;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Date;
 
@@ -26,9 +27,10 @@ class AvailabilityService
 
     /**
      * @param  string  $date  The day in the business timezone, formatted as Y-m-d.
+     * @param  Booking|null  $ignoring  A booking being moved: its current time does not count as busy.
      * @return Collection<int, CarbonImmutable> The free start times in UTC, in ascending order.
      */
-    public function availableSlots(Operator $operator, Service $service, string $date): Collection
+    public function availableSlots(Operator $operator, Service $service, string $date, ?Booking $ignoring = null): Collection
     {
         $timezone = config('app.business_timezone');
         $dayStart = CarbonImmutable::createFromFormat('!Y-m-d', $date, $timezone);
@@ -38,7 +40,7 @@ class AvailabilityService
         }
 
         $dayEnd = $dayStart->addDay();
-        $busyIntervals = $this->busyIntervals($operator, $dayStart->utc(), $dayEnd->utc());
+        $busyIntervals = $this->busyIntervals($operator, $dayStart->utc(), $dayEnd->utc(), $ignoring);
         $earliestStart = Date::now()->utc();
 
         return $operator->workingHours()
@@ -54,6 +56,34 @@ class AvailabilityService
             ->unique(fn (CarbonImmutable $start): int => $start->getTimestamp())
             ->sortBy(fn (CarbonImmutable $start): int => $start->getTimestamp())
             ->values();
+    }
+
+    /**
+     * The start times at which at least one active operator offering the service is free.
+     *
+     * @param  string  $date  The day in the business timezone, formatted as Y-m-d.
+     * @param  EloquentCollection<int, Operator>|null  $operators  The result of operatorsOffering(), when the caller already has it.
+     * @return Collection<int, CarbonImmutable> The free start times in UTC, in ascending order.
+     */
+    public function availableSlotsWithAnyOperator(Service $service, string $date, ?EloquentCollection $operators = null): Collection
+    {
+        return ($operators ?? $this->operatorsOffering($service))
+            ->flatMap(fn (Operator $operator): Collection => $this->availableSlots($operator, $service, $date))
+            ->unique(fn (CarbonImmutable $start): int => $start->getTimestamp())
+            ->sortBy(fn (CarbonImmutable $start): int => $start->getTimestamp())
+            ->values();
+    }
+
+    /**
+     * @return EloquentCollection<int, Operator>
+     */
+    public function operatorsOffering(Service $service): EloquentCollection
+    {
+        return Operator::query()
+            ->where('is_active', true)
+            ->whereRelation('services', 'services.id', $service->id)
+            ->orderBy('name')
+            ->get();
     }
 
     /**
@@ -94,10 +124,11 @@ class AvailabilityService
      *
      * @return array<int, array{CarbonImmutable, CarbonImmutable}>
      */
-    private function busyIntervals(Operator $operator, CarbonImmutable $from, CarbonImmutable $to): array
+    private function busyIntervals(Operator $operator, CarbonImmutable $from, CarbonImmutable $to, ?Booking $ignoring): array
     {
         $bookings = Booking::query()
             ->whereBelongsTo($operator)
+            ->when($ignoring, fn ($query) => $query->whereKeyNot($ignoring->id))
             ->whereIn('status', BookingStatus::slotOccupyingCases())
             ->where('starts_at', '<', $to)
             ->where('ends_at', '>', $from)

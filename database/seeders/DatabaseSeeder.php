@@ -2,7 +2,9 @@
 
 namespace Database\Seeders;
 
+use App\Enums\BookingStatus;
 use App\Enums\Weekday;
+use App\Models\Booking;
 use App\Models\Operator;
 use App\Models\Service;
 use App\Models\User;
@@ -32,7 +34,7 @@ class DatabaseSeeder extends Seeder
             'email' => 'cliente@example.com',
         ]);
 
-        User::factory(5)->create();
+        $customers = User::factory(5)->create();
 
         $haircut = Service::factory()->create(['name' => 'Taglio classico', 'description' => 'Forbici e macchinetta, shampoo e styling.', 'duration_minutes' => 30, 'price_cents' => 2000]);
         $beard = Service::factory()->create(['name' => 'Regolazione barba', 'description' => 'Rifinitura col rasoio e olio da barba.', 'duration_minutes' => 20, 'price_cents' => 1200]);
@@ -70,6 +72,29 @@ class DatabaseSeeder extends Seeder
 
         $bookingService->book($customer, $giulia, $haircut, $nextMonday, $customer);
         $bookingService->book($customer, $marco, $shave, $nextMonday->setTime(14, 0), $customer, 'Prima rasatura col rasoio');
+
+        $this->seedHistory($customer, $giulia, $haircut, BookingStatus::Completed, weeksAgo: [3, 7]);
+        $this->seedHistory($customers->first(), $marco, $haircutAndBeard, BookingStatus::NoShow, weeksAgo: [1, 2, 4]);
+    }
+
+    /**
+     * Past appointments, so the customer records and the no-show rule have
+     * something to show. They are inserted directly: BookingService only books the future.
+     *
+     * @param  list<int>  $weeksAgo
+     */
+    private function seedHistory(User $customer, Operator $operator, Service $service, BookingStatus $status, array $weeksAgo): void
+    {
+        foreach ($weeksAgo as $weeks) {
+            $startsAt = Date::parse("monday -{$weeks} weeks 11:00", config('app.business_timezone'))->utc();
+
+            Booking::factory()->for($customer, 'customer')->for($operator)->for($service)->create([
+                'starts_at' => $startsAt,
+                'ends_at' => $startsAt->addMinutes($service->duration_minutes),
+                'status' => $status,
+                'price_cents' => $service->price_cents,
+            ]);
+        }
     }
 
     /**

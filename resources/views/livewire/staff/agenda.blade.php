@@ -48,6 +48,10 @@
                     <flux:table.cell>{{ $booking->service->name }}</flux:table.cell>
                     <flux:table.cell class="py-0"><x-booking-status-badge :status="$booking->status" /></flux:table.cell>
                     <flux:table.cell align="end" class="py-0">
+                        @if (auth()->user()->isAdmin() && $booking->status->occupiesSlot() && $booking->starts_at->isFuture())
+                            <flux:button size="sm" variant="ghost" icon="arrows-right-left" :href="route('bookings.reschedule', $booking)" wire:navigate>{{ __('Move') }}</flux:button>
+                        @endif
+
                         @if ($booking->status === \App\Enums\BookingStatus::Confirmed && $booking->starts_at->isPast())
                             <div class="flex justify-end gap-1">
                                 <flux:button size="sm" variant="ghost" icon="check" wire:click="markCompleted({{ $booking->id }})">{{ __('Completed') }}</flux:button>

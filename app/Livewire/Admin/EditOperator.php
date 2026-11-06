@@ -2,15 +2,16 @@
 
 namespace App\Livewire\Admin;
 
-use App\Enums\BookingStatus;
 use App\Enums\Weekday;
 use App\Models\Operator;
 use App\Models\Service;
 use App\Models\TimeOff;
 use App\Models\WorkingHour;
+use App\Services\BookingService;
 use Carbon\CarbonImmutable;
 use Flux\Flux;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
@@ -146,7 +147,11 @@ class EditOperator extends Component
         unset($this->workingHours);
     }
 
-    public function addTimeOff(): void
+    /**
+     * Open bookings in the new time off are cancelled and their customers emailed,
+     * so nobody turns up while the barber is away.
+     */
+    public function addTimeOff(BookingService $bookingService): void
     {
         $this->authorize('update', $this->operator);
 
@@ -169,16 +174,12 @@ class EditOperator extends Component
         $this->reset('offStartsAt', 'offEndsAt', 'offReason');
         unset($this->timeOffs);
 
-        $conflicts = $this->operator->bookings()
-            ->whereIn('status', BookingStatus::slotOccupyingCases())
-            ->where('starts_at', '<', $endsAt)
-            ->where('ends_at', '>', $startsAt)
-            ->count();
+        $cancelled = $bookingService->cancelForTimeOff($this->operator, $startsAt, $endsAt, Auth::user());
 
-        if ($conflicts > 0) {
+        if ($cancelled > 0) {
             Flux::toast(
                 variant: 'warning',
-                text: trans_choice('{1} One booking falls in this period: it is not cancelled automatically.|[2,*] :count bookings fall in this period: they are not cancelled automatically.', $conflicts),
+                text: trans_choice('{1} Time off added. One booking was cancelled and its customer notified by email.|[2,*] Time off added. :count bookings were cancelled and their customers notified by email.', $cancelled),
                 duration: 0,
             );
 

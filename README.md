@@ -14,9 +14,9 @@ Built with Laravel 13, Livewire 4, Flux UI and Tailwind CSS. PHP 8.4, MySQL or S
 
 | Role | Features |
 |---|---|
-| **Customer** | Picks a service, an operator and a day, sees only the times that are really free, books, gets a confirmation email and a reminder 24 hours before, cancels for free up to 24 hours before. |
+| **Customer** | Picks a service and a barber, or the first available one, sees only the times that are really free and books. Gets a confirmation email with a calendar event (.ics) and a reminder 24 hours before. Moves or cancels for free up to 24 hours before. |
 | **Staff** | Sees their own daily agenda and marks appointments as completed or no-show once they have started. |
-| **Admin** | Manages services (price, duration, active), operators (services offered, weekly hours with lunch breaks, holidays and closures), sees every agenda and books on behalf of customers. Creating an operator with an email creates a staff account and sends a link to set the password. |
+| **Admin** | Manages services (price, duration, active), operators (services offered, weekly hours with lunch breaks, holidays and closures), sees every agenda, books and moves bookings on behalf of customers. Adding time off cancels the bookings it covers and emails their customers. Customer records show history, spending and no-shows. Creating an operator with an email creates a staff account and sends a link to set the password. |
 
 ## Architecture
 
@@ -70,6 +70,8 @@ Every timestamp is stored in UTC. Working hours are wall-clock times in the busi
 - **Deactivate, never delete**: services and operators with bookings are deactivated; foreign keys forbid deleting them.
 - **Roles are not mass-assignable**: a registration request cannot make itself admin, and a test proves it.
 - **Money as integer cents**: prices typed as `19,99` are converted with string arithmetic, never through floats.
+- **Fair use of the agenda**: a customer holds at most 3 upcoming bookings, up to 60 days ahead. After 3 no-shows online booking pauses until an admin enables it again; admins booking at the desk are not limited.
+- **Moving keeps the calendar in sync**: the .ics event keeps the booking's UID and raises its SEQUENCE, so the customer's calendar moves the appointment instead of duplicating it.
 
 ## Getting started
 

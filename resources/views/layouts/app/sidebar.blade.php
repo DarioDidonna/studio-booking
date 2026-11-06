@@ -45,6 +45,9 @@
                         <flux:sidebar.item icon="users" :href="route('admin.operators')" :current="request()->routeIs('admin.operators*')" wire:navigate>
                             {{ __('Operators') }}
                         </flux:sidebar.item>
+                        <flux:sidebar.item icon="identification" :href="route('admin.customers')" :current="request()->routeIs('admin.customers*')" wire:navigate>
+                            {{ __('Customers') }}
+                        </flux:sidebar.item>
                     </flux:sidebar.group>
                 @endcan
             </flux:sidebar.nav>

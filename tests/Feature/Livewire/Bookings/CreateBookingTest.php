@@ -174,6 +174,44 @@ class CreateBookingTest extends TestCase
         $this->assertDatabaseMissing('bookings', ['operator_id' => $operator->id]);
     }
 
+    public function test_first_available_barber_shows_the_times_of_every_operator_and_books_one(): void
+    {
+        [$operator, $service] = $this->operatorOffering();
+        $other = Operator::factory()->hasAttached($service)->create();
+        $other->workingHours()->create(['weekday' => Weekday::Monday, 'start_time' => '11:00:00', 'end_time' => '11:30:00']);
+        $customer = User::factory()->create();
+
+        Livewire::actingAs($customer)
+            ->test(CreateBooking::class)
+            ->set('serviceId', $service->id)
+            ->assertSet('operatorId', null)
+            ->assertSee('Primo barbiere disponibile')
+            ->set('operatorId', CreateBooking::ANY_OPERATOR)
+            ->set('date', '2027-03-15')
+            ->assertSee('09:30')
+            ->assertSee('11:00')
+            ->set('slot', '2027-03-15 10:00:00')
+            ->call('book')
+            ->assertHasNoErrors()
+            ->assertRedirect(route('bookings.index'));
+
+        $this->assertDatabaseHas('bookings', ['customer_id' => $customer->id, 'operator_id' => $other->id]);
+    }
+
+    public function test_customer_blocked_for_no_shows_sees_why_instead_of_the_form(): void
+    {
+        $customer = User::factory()->create();
+        Booking::factory()->count(Booking::NO_SHOW_LIMIT)->for($customer, 'customer')->noShow()->create([
+            'starts_at' => CarbonImmutable::parse('2027-02-01 09:00', 'UTC'),
+            'ends_at' => CarbonImmutable::parse('2027-02-01 10:00', 'UTC'),
+        ]);
+
+        Livewire::actingAs($customer)
+            ->test(CreateBooking::class)
+            ->assertSee('Prenotazione online sospesa')
+            ->assertDontSee('Conferma prenotazione');
+    }
+
     public function test_rejects_an_operator_who_does_not_offer_the_service(): void
     {
         [, $service] = $this->operatorOffering();

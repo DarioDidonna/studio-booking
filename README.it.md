@@ -14,9 +14,9 @@ Realizzato con Laravel 13, Livewire 4, Flux UI e Tailwind CSS. PHP 8.4, MySQL o 
 
 | Ruolo | Funzioni |
 |---|---|
-| **Cliente** | Sceglie servizio, operatore e giorno, vede solo gli orari davvero liberi, prenota, riceve l'email di conferma e un promemoria 24 ore prima, annulla gratis fino a 24 ore prima. |
+| **Cliente** | Sceglie servizio e barbiere, oppure il primo disponibile, vede solo gli orari davvero liberi e prenota. Riceve l'email di conferma con l'evento per il calendario (.ics) e un promemoria 24 ore prima. Sposta o annulla gratis fino a 24 ore prima. |
 | **Staff** | Vede la propria agenda del giorno e segna gli appuntamenti come completati o "non presentato" quando sono iniziati. |
-| **Admin** | Gestisce i servizi (prezzo, durata, attivo), gli operatori (servizi offerti, orari settimanali con pausa pranzo, ferie e chiusure), vede tutte le agende e prenota per conto dei clienti. Se crea un operatore con un'email, nasce un account staff e parte un link per impostare la password. |
+| **Admin** | Gestisce i servizi (prezzo, durata, attivo), gli operatori (servizi offerti, orari settimanali con pausa pranzo, ferie e chiusure), vede tutte le agende, prenota e sposta appuntamenti per conto dei clienti. Quando inserisce delle ferie, le prenotazioni coinvolte vengono annullate e i clienti avvisati via email. La scheda cliente mostra storico, spesa e assenze. Se crea un operatore con un'email, nasce un account staff e parte un link per impostare la password. |
 
 ## Architettura
 
@@ -70,6 +70,8 @@ Ogni data è salvata in UTC. Gli orari di lavoro sono ore "da orologio" nel fuso
 - **Disattivare, mai cancellare**: servizi e operatori con prenotazioni si disattivano; le chiavi esterne ne impediscono la cancellazione.
 - **Il ruolo non è assegnabile da un form**: una richiesta di registrazione non può renderti admin, e un test lo dimostra.
 - **Soldi in centesimi interi**: un prezzo scritto `19,99` viene convertito con l'aritmetica delle stringhe, mai con i numeri decimali.
+- **Uso corretto dell'agenda**: un cliente ha al massimo 3 prenotazioni in programma, fino a 60 giorni avanti. Dopo 3 assenze la prenotazione online si sospende finché un admin non la riattiva; l'admin che prenota al banco non ha limiti.
+- **Spostare tiene allineato il calendario**: l'evento .ics mantiene lo stesso UID della prenotazione e aumenta il SEQUENCE, così il calendario del cliente sposta l'appuntamento invece di duplicarlo.
 
 ## Avvio
 

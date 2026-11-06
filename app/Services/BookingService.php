@@ -3,10 +3,12 @@
 namespace App\Services;
 
 use App\Enums\BookingStatus;
+use App\Exceptions\BookingCannotBeMovedException;
 use App\Exceptions\BookingNotStartedException;
 use App\Exceptions\CancellationWindowClosedException;
 use App\Exceptions\InvalidBookingTransitionException;
 use App\Exceptions\SlotNotAvailableException;
+use App\Exceptions\TooManyNoShowsException;
 use App\Exceptions\TooManyOpenBookingsException;
 use App\Models\Booking;
 use App\Models\Operator;
@@ -14,6 +16,7 @@ use App\Models\Service;
 use App\Models\User;
 use App\Notifications\BookingCancelled;
 use App\Notifications\BookingConfirmed;
+use App\Notifications\BookingRescheduled;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -38,10 +41,12 @@ class BookingService
      *
      * Customers booking for themselves may hold only a few upcoming bookings;
      * their row is locked too, so two parallel requests cannot both pass the
-     * limit. Admins booking at the desk are not limited.
+     * limit. Customers with too many recent no-shows must book through the
+     * barbershop. Admins booking at the desk are not limited.
      *
      * @throws SlotNotAvailableException
      * @throws TooManyOpenBookingsException
+     * @throws TooManyNoShowsException
      */
     public function book(User $customer, Operator $operator, Service $service, CarbonImmutable $startsAt, User $bookedBy, ?string $notes = null): Booking
     {
@@ -52,7 +57,11 @@ class BookingService
             $lockedOperator = Operator::query()->whereKey($operator->id)->lockForUpdate()->firstOrFail();
 
             if (! $bookedBy->isAdmin()) {
-                User::query()->whereKey($customer->id)->lockForUpdate()->firstOrFail();
+                $lockedCustomer = User::query()->whereKey($customer->id)->lockForUpdate()->firstOrFail();
+
+                if ($lockedCustomer->isBlockedForNoShows()) {
+                    throw new TooManyNoShowsException;
+                }
 
                 if ($this->upcomingBookingsCount($customer) >= Booking::MAX_UPCOMING_PER_CUSTOMER) {
                     throw new TooManyOpenBookingsException;
@@ -90,20 +99,125 @@ class BookingService
     }
 
     /**
+     * "First available barber": the operators offering the service are tried
+     * from the least busy that day, each through book(), so the same locking
+     * rules apply. A slot taken meanwhile simply moves on to the next operator.
+     *
+     * @throws SlotNotAvailableException
+     * @throws TooManyOpenBookingsException
+     * @throws TooManyNoShowsException
+     */
+    public function bookWithAnyOperator(User $customer, Service $service, CarbonImmutable $startsAt, User $bookedBy, ?string $notes = null): Booking
+    {
+        $localDay = $startsAt->setTimezone(config('app.business_timezone'))->startOfDay();
+
+        $operators = $this->availability->operatorsOffering($service)
+            ->loadCount(['bookings' => fn ($query) => $query
+                ->whereIn('status', BookingStatus::slotOccupyingCases())
+                ->whereBetweenStarts($localDay, $localDay->addDay())])
+            ->sortBy('bookings_count');
+
+        foreach ($operators as $operator) {
+            try {
+                return $this->book($customer, $operator, $service, $startsAt, $bookedBy, $notes);
+            } catch (SlotNotAvailableException) {
+                continue;
+            }
+        }
+
+        throw new SlotNotAvailableException;
+    }
+
+    /**
+     * Move a booking to another free time with the same operator and service.
+     * Customers may do it within the same window as a free cancellation.
+     *
+     * @throws BookingCannotBeMovedException
+     * @throws SlotNotAvailableException
+     */
+    public function reschedule(Booking $booking, CarbonImmutable $startsAt, User $movedBy): Booking
+    {
+        if (! $movedBy->isAdmin() && Date::now()->greaterThanOrEqualTo($booking->freeCancellationEndsAt())) {
+            throw BookingCannotBeMovedException::windowClosed();
+        }
+
+        $moved = DB::transaction(function () use ($booking, $startsAt): Booking {
+            $lockedOperator = Operator::query()->whereKey($booking->operator_id)->lockForUpdate()->firstOrFail();
+            $locked = Booking::query()->whereKey($booking->id)->lockForUpdate()->firstOrFail();
+
+            if (! $locked->status->occupiesSlot() || $locked->starts_at->isPast()) {
+                throw BookingCannotBeMovedException::notOpen();
+            }
+
+            if (! $this->isFreeSlot($lockedOperator, $locked->service, $startsAt, ignoring: $locked)) {
+                throw new SlotNotAvailableException;
+            }
+
+            $reminderDueAt = $startsAt->utc()->subHours(Booking::REMINDER_HOURS);
+
+            $locked->update([
+                'starts_at' => $startsAt->utc(),
+                'ends_at' => $startsAt->utc()->addMinutes($locked->service->duration_minutes),
+                'reminder_due_at' => $reminderDueAt->isFuture() ? $reminderDueAt : null,
+                'reminder_sent_at' => null,
+            ]);
+
+            return $locked;
+        });
+
+        $moved->customer?->notify(new BookingRescheduled($moved));
+
+        return $moved;
+    }
+
+    /**
      * Customers may cancel for free until the cancellation window closes;
      * admins may cancel at any time, for example when the studio closes.
+     * The reason, when given, is included in the email to the customer.
      *
      * @throws CancellationWindowClosedException
      * @throws InvalidBookingTransitionException
      */
-    public function cancel(Booking $booking, User $cancelledBy): Booking
+    public function cancel(Booking $booking, User $cancelledBy, ?string $reason = null): Booking
     {
         if (! $cancelledBy->isAdmin() && Date::now()->greaterThanOrEqualTo($booking->freeCancellationEndsAt())) {
             throw new CancellationWindowClosedException;
         }
 
         $cancelled = $this->transition($booking, BookingStatus::Cancelled, $cancelledBy);
-        $cancelled->customer?->notify(new BookingCancelled($cancelled));
+        $cancelled->customer?->notify(new BookingCancelled($cancelled, $reason));
+
+        return $cancelled;
+    }
+
+    /**
+     * When an operator takes time off, the upcoming open bookings it covers are
+     * cancelled and their customers told why, so nobody turns up to an absent
+     * barber. Past appointments are left alone: time off recorded after the
+     * fact must not rewrite visits that happened.
+     *
+     * @return int How many bookings were cancelled.
+     */
+    public function cancelForTimeOff(Operator $operator, CarbonImmutable $from, CarbonImmutable $to, User $cancelledBy): int
+    {
+        $affected = $operator->bookings()
+            ->whereIn('status', BookingStatus::slotOccupyingCases())
+            ->where('starts_at', '<', $to->utc())
+            ->where('ends_at', '>', $from->utc())
+            ->where('starts_at', '>', Date::now())
+            ->get();
+
+        $reason = __(':operator is not available on that day.', ['operator' => $operator->name]);
+        $cancelled = 0;
+
+        foreach ($affected as $booking) {
+            try {
+                $this->cancel($booking, $cancelledBy, $reason);
+                $cancelled++;
+            } catch (InvalidBookingTransitionException) {
+                // Cancelled or closed by someone else since the query: nothing left to do.
+            }
+        }
 
         return $cancelled;
     }
@@ -150,12 +264,12 @@ class BookingService
             ->count();
     }
 
-    private function isFreeSlot(Operator $operator, Service $service, CarbonImmutable $startsAt): bool
+    private function isFreeSlot(Operator $operator, Service $service, CarbonImmutable $startsAt, ?Booking $ignoring = null): bool
     {
         $localDate = $startsAt->setTimezone(config('app.business_timezone'))->toDateString();
 
         return $this->availability
-            ->availableSlots($operator, $service, $localDate)
+            ->availableSlots($operator, $service, $localDate, $ignoring)
             ->contains(fn (CarbonImmutable $slot): bool => $slot->equalTo($startsAt));
     }
 

@@ -3,6 +3,7 @@
 namespace App\Notifications;
 
 use App\Models\Booking;
+use App\Services\CalendarInvite;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
@@ -32,11 +33,12 @@ class BookingConfirmed extends Notification implements ShouldQueue
     }
 
     /**
-     * Get the mail representation of the notification.
+     * Get the mail representation of the notification, with a calendar event attached.
      */
     public function toMail(object $notifiable): MailMessage
     {
         $this->booking->loadMissing(['service', 'operator']);
+        $calendar = app(CalendarInvite::class);
 
         return (new MailMessage)
             ->subject(__('Booking confirmed: :service', ['service' => $this->booking->service->name]))
@@ -49,6 +51,7 @@ class BookingConfirmed extends Notification implements ShouldQueue
             ->line(__('You can cancel for free until :deadline.', [
                 'deadline' => $this->booking->freeCancellationEndsAt()->setTimezone(config('app.business_timezone'))->format('d/m/Y H:i'),
             ]))
-            ->action(__('View your bookings'), route('dashboard'));
+            ->action(__('View your bookings'), route('dashboard'))
+            ->attachData($calendar->forBooking($this->booking), $calendar->filename($this->booking), ['mime' => 'text/calendar; charset=utf-8']);
     }
 }

@@ -4,6 +4,7 @@ namespace App\Livewire\Bookings;
 
 use App\Enums\UserRole;
 use App\Exceptions\SlotNotAvailableException;
+use App\Exceptions\TooManyNoShowsException;
 use App\Exceptions\TooManyOpenBookingsException;
 use App\Models\Booking;
 use App\Models\Operator;
@@ -29,6 +30,7 @@ use Livewire\Component;
  * @property-read Collection<int, CarbonImmutable> $availableSlots
  * @property-read CarbonImmutable|null $selectedSlot
  * @property-read EloquentCollection<int, User> $customers
+ * @property-read bool $isBlockedForNoShows
  */
 #[Title('Book an appointment')]
 class CreateBooking extends Component
@@ -38,8 +40,16 @@ class CreateBooking extends Component
      */
     public ?int $customerId = null;
 
+    /**
+     * The operatorId that stands for "first available barber".
+     */
+    public const ANY_OPERATOR = 0;
+
     public ?int $serviceId = null;
 
+    /**
+     * An operator id, or ANY_OPERATOR to let the barbershop pick whoever is free.
+     */
     public ?int $operatorId = null;
 
     /**
@@ -72,6 +82,17 @@ class CreateBooking extends Component
         }
 
         return User::query()->where('role', UserRole::Customer)->orderBy('name')->get(['id', 'name', 'email']);
+    }
+
+    /**
+     * Customers with too many no-shows see why they cannot book instead of the form.
+     */
+    #[Computed]
+    public function isBlockedForNoShows(): bool
+    {
+        $user = Auth::user();
+
+        return ! $user->isAdmin() && $user->isBlockedForNoShows();
     }
 
     /**
@@ -112,15 +133,11 @@ class CreateBooking extends Component
     #[Computed]
     public function operators(): EloquentCollection
     {
-        if ($this->serviceId === null) {
+        if ($this->selectedService === null) {
             return new EloquentCollection;
         }
 
-        return Operator::query()
-            ->where('is_active', true)
-            ->whereRelation('services', 'services.id', $this->serviceId)
-            ->orderBy('name')
-            ->get();
+        return app(AvailabilityService::class)->operatorsOffering($this->selectedService);
     }
 
     #[Computed]
@@ -135,9 +152,17 @@ class CreateBooking extends Component
     #[Computed]
     public function availableSlots(): Collection
     {
+        if ($this->selectedService === null || ! $this->isValidDate($this->date)) {
+            return collect();
+        }
+
+        if ($this->operatorId === self::ANY_OPERATOR) {
+            return app(AvailabilityService::class)->availableSlotsWithAnyOperator($this->selectedService, $this->date, $this->operators);
+        }
+
         $operator = $this->operators->firstWhere('id', $this->operatorId);
 
-        if ($this->selectedService === null || $operator === null || ! $this->isValidDate($this->date)) {
+        if ($operator === null) {
             return collect();
         }
 
@@ -170,9 +195,10 @@ class CreateBooking extends Component
         ]);
 
         $service = Service::query()->whereKey($this->serviceId)->firstOrFail();
-        $operator = $service->operators()->where('is_active', true)->whereKey($this->operatorId)->first();
+        $anyOperator = $this->operatorId === self::ANY_OPERATOR;
+        $operator = $anyOperator ? null : $service->operators()->where('is_active', true)->whereKey($this->operatorId)->first();
 
-        if ($operator === null || $this->selectedSlot === null) {
+        if ((! $anyOperator && $operator === null) || $this->selectedSlot === null) {
             $this->addError('operatorId', __('This operator does not offer the selected service.'));
 
             return;
@@ -181,22 +207,19 @@ class CreateBooking extends Component
         $bookedBy = Auth::user();
         $customer = $bookedBy->isAdmin() ? User::query()->findOrFail($this->customerId) : $bookedBy;
 
+        $notes = $this->notes !== '' ? $this->notes : null;
+
         try {
-            $bookingService->book(
-                $customer,
-                $operator,
-                $service,
-                $this->selectedSlot,
-                $bookedBy,
-                $this->notes !== '' ? $this->notes : null,
-            );
+            $booking = $operator === null
+                ? $bookingService->bookWithAnyOperator($customer, $service, $this->selectedSlot, $bookedBy, $notes)
+                : $bookingService->book($customer, $operator, $service, $this->selectedSlot, $bookedBy, $notes);
         } catch (SlotNotAvailableException $exception) {
             $this->reset('slot');
             unset($this->availableSlots);
             $this->addError('slot', $exception->getMessage());
 
             return;
-        } catch (TooManyOpenBookingsException $exception) {
+        } catch (TooManyOpenBookingsException|TooManyNoShowsException $exception) {
             $this->addError('slot', $exception->getMessage());
 
             return;
@@ -204,12 +227,14 @@ class CreateBooking extends Component
 
         if ($bookedBy->isAdmin()) {
             Flux::toast(variant: 'success', text: __('Booking confirmed. :name received an email with the details.', ['name' => $customer->name]));
-            $this->redirectRoute('agenda', ['operator' => $operator->id, 'date' => $this->date], navigate: true);
+            $this->redirectRoute('agenda', ['operator' => $booking->operator_id, 'date' => $this->date], navigate: true);
 
             return;
         }
 
-        Flux::toast(variant: 'success', text: __('Booking confirmed. We sent you an email with the details.'));
+        Flux::toast(variant: 'success', text: $anyOperator
+            ? __('Booking confirmed with :operator. We sent you an email with the details.', ['operator' => $booking->operator->name])
+            : __('Booking confirmed. We sent you an email with the details.'));
 
         $this->redirectRoute('bookings.index', navigate: true);
     }
