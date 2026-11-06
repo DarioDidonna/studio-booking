@@ -1,10 +1,10 @@
-# Studio Booking
+# Barberia Didonna
 
 [![Tests](https://github.com/DarioDidonna/studio-booking/actions/workflows/tests.yml/badge.svg)](https://github.com/DarioDidonna/studio-booking/actions/workflows/tests.yml)
 
 [Leggi in italiano](README.it.md)
 
-A booking system for a studio with services and operators (hair salon, physiotherapist, gym with trainers). Customers book a free time online, staff see their agenda, and the admin manages the catalogue, the working hours and the holidays.
+A booking system for a barbershop, with a classic barbershop look. Customers book a free time online with the barber they prefer, barbers see their agenda, and the admin manages the price list, the working hours and the holidays. The domain is generic (services and operators), so it fits any appointment-based business.
 
 The interesting part is not the CRUD but the guarantees behind it: **no double bookings under concurrent requests**, **correct times across daylight saving changes**, and **emails that are sent exactly when they should be**.
 
@@ -77,7 +77,7 @@ Requirements: PHP 8.4, Composer, Node 22.
 
 ```bash
 composer setup            # install, create .env, migrate, build assets (SQLite by default)
-php artisan db:seed       # demo studio: services, operators, hours, bookings
+php artisan db:seed       # demo barbershop: services, barbers, hours, bookings
 composer run dev          # server, queue worker, logs and Vite
 ```
 

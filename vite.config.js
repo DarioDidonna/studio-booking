@@ -16,6 +16,13 @@ export default defineConfig({
                 bunny('Instrument Sans', {
                     weights: [400, 500, 600],
                 }),
+                bunny('Playfair Display', {
+                    weights: [700, 900],
+                    styles: ['normal', 'italic'],
+                }),
+                bunny('Oswald', {
+                    weights: [500, 600],
+                }),
             ],
         }),
         tailwindcss(),

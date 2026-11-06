@@ -1,10 +1,10 @@
-# Studio Booking
+# Barberia Didonna
 
 [![Tests](https://github.com/DarioDidonna/studio-booking/actions/workflows/tests.yml/badge.svg)](https://github.com/DarioDidonna/studio-booking/actions/workflows/tests.yml)
 
 [Read in English](README.md)
 
-Un sistema di prenotazioni per uno studio con servizi e operatori (parrucchiere, fisioterapista, palestra con istruttori). Il cliente prenota online un orario libero, lo staff vede la propria agenda, l'admin gestisce listino, orari di lavoro e ferie.
+Un sistema di prenotazioni per una barberia, con un aspetto da bottega classica. Il cliente prenota online un orario libero con il barbiere che preferisce, i barbieri vedono la propria agenda, l'admin gestisce listino, orari di lavoro e ferie. Il dominio è generico (servizi e operatori), quindi si adatta a qualsiasi attività su appuntamento.
 
 La parte interessante non è il CRUD ma le garanzie che ci stanno dietro: **nessuna doppia prenotazione con richieste simultanee**, **orari corretti anche al cambio dell'ora legale** ed **email inviate esattamente quando devono partire**.
 
@@ -77,7 +77,7 @@ Requisiti: PHP 8.4, Composer, Node 22.
 
 ```bash
 composer setup            # installa, crea .env, esegue le migrazioni, compila gli asset (SQLite di default)
-php artisan db:seed       # studio demo: servizi, operatori, orari, prenotazioni
+php artisan db:seed       # barberia demo: servizi, barbieri, orari, prenotazioni
 composer run dev          # server, worker della coda, log e Vite
 ```
 
