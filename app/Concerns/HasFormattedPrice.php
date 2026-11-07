@@ -11,7 +11,15 @@ trait HasFormattedPrice
 {
     public function formattedPrice(): string
     {
-        $euros = $this->price_cents / 100;
+        return self::formatCents($this->price_cents);
+    }
+
+    /**
+     * Euro cents as an Italian price, with a fallback for when intl is missing.
+     */
+    public static function formatCents(int $cents): string
+    {
+        $euros = $cents / 100;
 
         return Number::currency($euros, in: 'EUR', locale: 'it')
             ?: number_format($euros, 2, ',', '.').' €';

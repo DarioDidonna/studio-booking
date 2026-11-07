@@ -49,15 +49,9 @@ class StripeWebhookController extends Controller
                 return;
             }
 
-            $bookingId = $session->metadata['booking_id'] ?? null;
-
-            // Cards are paid on completion. Delayed methods such as SEPA debit
-            // complete unpaid and report the outcome days later in a second event.
             match ($event->type) {
-                'checkout.session.completed', 'checkout.session.async_payment_succeeded' => $session->payment_status === 'paid'
-                    ? $deposits->handlePaidCheckout($session->id, $bookingId, (string) $session->payment_intent)
-                    : null,
-                'checkout.session.expired', 'checkout.session.async_payment_failed' => $deposits->handleExpiredCheckout($session->id, $bookingId),
+                'checkout.session.completed', 'checkout.session.async_payment_succeeded' => $deposits->handleCompletedCheckout($session),
+                'checkout.session.expired', 'checkout.session.async_payment_failed' => $deposits->handleFailedCheckout($session),
                 default => null,
             };
         });

@@ -8,6 +8,7 @@ use App\Exceptions\PaymentUnavailableException;
 use App\Exceptions\SlotNotAvailableException;
 use App\Exceptions\TooManyNoShowsException;
 use App\Exceptions\TooManyOpenBookingsException;
+use App\Exceptions\TooManyUnpaidBookingsException;
 use App\Models\Booking;
 use App\Models\Operator;
 use App\Models\Service;
@@ -214,7 +215,7 @@ class CreateBooking extends Component
     #[Computed]
     public function takesDeposit(): bool
     {
-        return ! Auth::user()->isAdmin() && filled(config('services.stripe.secret'));
+        return app(BookingService::class)->takesDeposit(Auth::user());
     }
 
     public function book(BookingService $bookingService, DepositService $deposits): void
@@ -257,7 +258,7 @@ class CreateBooking extends Component
             $this->addError('slot', $exception->getMessage());
 
             return;
-        } catch (TooManyOpenBookingsException|TooManyNoShowsException $exception) {
+        } catch (TooManyOpenBookingsException|TooManyNoShowsException|TooManyUnpaidBookingsException $exception) {
             $this->addError('slot', $exception->getMessage());
 
             return;

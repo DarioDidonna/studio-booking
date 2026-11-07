@@ -30,7 +30,7 @@
             ['label' => __('Completed visits'), 'value' => $this->totals['completed']],
             ['label' => __('Cancellations'), 'value' => $this->totals['cancelled']],
             ['label' => __('No-shows'), 'value' => $this->totals['no_shows']],
-            ['label' => __('Spent'), 'value' => \Illuminate\Support\Number::currency($this->totals['spent_cents'] / 100, in: 'EUR', locale: 'it')],
+            ['label' => __('Spent'), 'value' => \App\Models\Booking::formatCents($this->totals['spent_cents'])],
         ] as $stat)
             <div class="rounded-xl border border-zinc-200 p-5 dark:border-zinc-700">
                 <dt><flux:text>{{ $stat['label'] }}</flux:text></dt>

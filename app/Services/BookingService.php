@@ -11,6 +11,7 @@ use App\Exceptions\InvalidBookingTransitionException;
 use App\Exceptions\SlotNotAvailableException;
 use App\Exceptions\TooManyNoShowsException;
 use App\Exceptions\TooManyOpenBookingsException;
+use App\Exceptions\TooManyUnpaidBookingsException;
 use App\Jobs\RefundDeposit;
 use App\Models\Booking;
 use App\Models\Operator;
@@ -54,6 +55,7 @@ class BookingService
      * @throws SlotNotAvailableException
      * @throws TooManyOpenBookingsException
      * @throws TooManyNoShowsException
+     * @throws TooManyUnpaidBookingsException
      */
     public function book(User $customer, Operator $operator, Service $service, CarbonImmutable $startsAt, User $bookedBy, ?string $notes = null): Booking
     {
@@ -72,6 +74,10 @@ class BookingService
 
                 if ($this->upcomingBookingsCount($customer) >= Booking::MAX_UPCOMING_PER_CUSTOMER) {
                     throw new TooManyOpenBookingsException;
+                }
+
+                if ($this->takesDeposit($bookedBy) && $this->recentUnpaidLapsesCount($customer) >= Booking::UNPAID_LAPSES_PER_DAY) {
+                    throw new TooManyUnpaidBookingsException;
                 }
             }
 
@@ -247,7 +253,13 @@ class BookingService
                 return $locked;
             }
 
-            $locked->update(['status' => BookingStatus::Confirmed, 'payment_due_at' => null]);
+            // A reminder that fell due while the customer was paying would arrive
+            // right after the confirmation: skip it, as for a last-minute booking.
+            $locked->update([
+                'status' => BookingStatus::Confirmed,
+                'payment_due_at' => null,
+                'reminder_due_at' => $locked->reminder_due_at?->isFuture() ? $locked->reminder_due_at : null,
+            ]);
             $locked->statusHistory()->create([
                 'from_status' => BookingStatus::Pending,
                 'to_status' => BookingStatus::Confirmed,
@@ -266,14 +278,19 @@ class BookingService
     }
 
     /**
-     * The payment window ran out: the booking is released so the slot is free again.
+     * Free the slot of a booking whose deposit was never paid. The customer
+     * is emailed only when they had their chance to pay: not when the payment
+     * page could not even be opened.
      *
      * @throws InvalidBookingTransitionException
      */
-    public function releaseUnpaid(Booking $booking): Booking
+    public function releaseUnpaid(Booking $booking, bool $notifyCustomer = true): Booking
     {
         $released = $this->transition($booking, BookingStatus::Cancelled, null, onlyIf: fn (Booking $locked): bool => $locked->deposit_status === DepositStatus::Unpaid);
-        $released->customer?->notify(new BookingCancelled($released, __('The deposit was not paid in time, so the time has been released.')));
+
+        if ($notifyCustomer) {
+            $released->customer?->notify(new BookingCancelled($released, __('The deposit was not paid in time, so the time has been released.')));
+        }
 
         return $released;
     }
@@ -348,7 +365,7 @@ class BookingService
      * Customers booking online pay a deposit when Stripe is configured;
      * admins booking at the desk never do.
      */
-    private function takesDeposit(User $bookedBy): bool
+    public function takesDeposit(User $bookedBy): bool
     {
         return ! $bookedBy->isAdmin() && filled(config('services.stripe.secret'));
     }
@@ -358,6 +375,15 @@ class BookingService
         if ($booking->deposit_status === DepositStatus::Paid) {
             RefundDeposit::dispatch($booking);
         }
+    }
+
+    private function recentUnpaidLapsesCount(User $customer): int
+    {
+        return $customer->bookings()
+            ->where('status', BookingStatus::Cancelled)
+            ->where('deposit_status', DepositStatus::Unpaid)
+            ->where('cancelled_at', '>', Date::now()->subDay())
+            ->count();
     }
 
     private function upcomingBookingsCount(User $customer): int

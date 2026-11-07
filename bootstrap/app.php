@@ -16,7 +16,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [AddSecurityHeaders::class]);
 
         // Stripe signs its webhooks instead of sending a CSRF token.
-        $middleware->validateCsrfTokens(except: ['stripe/webhook']);
+        // https://laravel.com/docs/13.x/csrf#csrf-excluding-uris
+        $middleware->preventRequestForgery(except: ['stripe/webhook']);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

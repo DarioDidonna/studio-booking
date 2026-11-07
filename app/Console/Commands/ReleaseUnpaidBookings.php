@@ -16,6 +16,12 @@ use Illuminate\Support\Facades\Date;
 class ReleaseUnpaidBookings extends Command
 {
     /**
+     * Minutes to wait past the deadline, so a payment made at the last moment
+     * has time to be confirmed by its webhook before the slot is freed.
+     */
+    private const GRACE_MINUTES = 10;
+
+    /**
      * Stripe's checkout.session.expired event normally does this; the command
      * is the safety net for an event that never arrives.
      */
@@ -26,11 +32,12 @@ class ReleaseUnpaidBookings extends Command
         Booking::query()
             ->where('status', BookingStatus::Pending)
             ->where('deposit_status', DepositStatus::Unpaid)
-            ->where('payment_due_at', '<=', Date::now())
+            ->where('payment_due_at', '<=', Date::now()->subMinutes(self::GRACE_MINUTES))
             ->chunkById(100, function ($bookings) use ($deposits, &$released): void {
                 foreach ($bookings as $booking) {
-                    $deposits->release($booking);
-                    $released++;
+                    if ($deposits->release($booking)) {
+                        $released++;
+                    }
                 }
             });
 

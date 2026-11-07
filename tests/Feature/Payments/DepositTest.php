@@ -5,6 +5,7 @@ namespace Tests\Feature\Payments;
 use App\Enums\BookingStatus;
 use App\Enums\DepositStatus;
 use App\Enums\Weekday;
+use App\Exceptions\TooManyUnpaidBookingsException;
 use App\Jobs\RefundDeposit;
 use App\Livewire\Bookings\CreateBooking;
 use App\Models\Booking;
@@ -104,11 +105,13 @@ class DepositTest extends TestCase
         $booking = Booking::query()->sole();
         $component->assertRedirect("https://checkout.stripe.test/pay/cs_test_{$booking->id}");
         $this->assertSame("cs_test_{$booking->id}", $booking->stripe_checkout_session_id);
-        $this->assertSame('2027-03-01 12:30:00', $this->gateway->checkouts[0]['expires_at']->utc()->toDateTimeString());
+        $this->assertGreaterThan(30 * 60, now()->diffInSeconds($this->gateway->checkouts[0]['expires_at']));
+        $this->assertTrue($booking->payment_due_at->equalTo($this->gateway->checkouts[0]['expires_at']));
     }
 
-    public function test_slot_is_released_at_once_when_stripe_cannot_be_reached(): void
+    public function test_slot_is_released_at_once_and_silently_when_stripe_cannot_be_reached(): void
     {
+        Notification::fake();
         $this->gateway->failCheckout = true;
         [$operator, $service] = $this->operatorOffering();
         $customer = User::factory()->create();
@@ -124,6 +127,7 @@ class DepositTest extends TestCase
             ->assertNoRedirect();
 
         $this->assertSame(BookingStatus::Cancelled, Booking::query()->sole()->status);
+        Notification::assertNothingSent();
     }
 
     public function test_webhook_with_a_bad_signature_is_rejected(): void
@@ -154,6 +158,16 @@ class DepositTest extends TestCase
         $this->assertDatabaseCount('stripe_webhook_events', 1);
     }
 
+    public function test_payment_of_a_different_amount_does_not_confirm_the_booking(): void
+    {
+        $booking = $this->pendingBooking();
+
+        $this->postSignedWebhook($this->event('evt_7', 'checkout.session.completed', $booking, amount: 1))->assertOk();
+
+        $this->assertSame(BookingStatus::Pending, $booking->fresh()->status);
+        $this->assertSame(DepositStatus::Unpaid, $booking->fresh()->deposit_status);
+    }
+
     public function test_expired_checkout_releases_the_slot(): void
     {
         Notification::fake();
@@ -173,12 +187,69 @@ class DepositTest extends TestCase
 
         $this->travel(Booking::PAYMENT_WINDOW_MINUTES + 1)->minutes();
         $this->artisan('bookings:release-unpaid')->assertSuccessful();
+        $this->assertSame(BookingStatus::Pending, $booking->fresh()->status, 'A payment made at the last moment still has time to arrive.');
+
+        $this->travel(10)->minutes();
+        $this->artisan('bookings:release-unpaid')->expectsOutput('Released 1 unpaid bookings.')->assertSuccessful();
         $this->postSignedWebhook($this->event('evt_3', 'checkout.session.completed', $booking))->assertOk();
 
         $booking->refresh();
         $this->assertSame(BookingStatus::Cancelled, $booking->status);
         $this->assertSame(DepositStatus::Refunded, $booking->deposit_status);
         $this->assertSame(['refund-deposit-'.$booking->id => 'pi_test_1'], $this->gateway->refunds);
+    }
+
+    public function test_delayed_payment_keeps_the_slot_until_the_bank_answers(): void
+    {
+        $booking = $this->pendingBooking();
+        $completedUnpaid = (string) json_encode([
+            'id' => 'evt_4',
+            'object' => 'event',
+            'type' => 'checkout.session.completed',
+            'data' => ['object' => [
+                'id' => $booking->stripe_checkout_session_id,
+                'object' => 'checkout.session',
+                'payment_status' => 'unpaid',
+                'payment_intent' => 'pi_test_1',
+                'metadata' => ['booking_id' => (string) $booking->id],
+            ]],
+        ]);
+
+        $this->postSignedWebhook($completedUnpaid)->assertOk();
+        $this->travel(2)->hours();
+        $this->artisan('bookings:release-unpaid')->assertSuccessful();
+        $this->assertSame(BookingStatus::Pending, $booking->fresh()->status);
+
+        $this->postSignedWebhook($this->event('evt_5', 'checkout.session.async_payment_succeeded', $booking))->assertOk();
+
+        $this->assertSame(BookingStatus::Confirmed, $booking->fresh()->status);
+    }
+
+    public function test_reminder_that_fell_due_while_paying_is_skipped(): void
+    {
+        $booking = $this->pendingBooking();
+        $booking->update(['reminder_due_at' => now()->addMinutes(10)]);
+        $this->travel(20)->minutes();
+
+        $this->postSignedWebhook($this->event('evt_6', 'checkout.session.completed', $booking))->assertOk();
+
+        $this->assertNull($booking->fresh()->reminder_due_at);
+    }
+
+    public function test_customer_who_lets_bookings_lapse_unpaid_cannot_keep_holding_slots(): void
+    {
+        [$operator, $service] = $this->operatorOffering();
+        $customer = User::factory()->create();
+        Booking::factory()->count(Booking::UNPAID_LAPSES_PER_DAY)->for($customer, 'customer')->create([
+            'status' => BookingStatus::Cancelled,
+            'cancelled_at' => now()->subHour(),
+            'deposit_cents' => Booking::DEPOSIT_CENTS,
+            'deposit_status' => DepositStatus::Unpaid,
+        ]);
+
+        $this->expectException(TooManyUnpaidBookingsException::class);
+
+        app(BookingService::class)->book($customer, $operator, $service, $this->mondayAt('10:00'), $customer);
     }
 
     public function test_deposit_is_refunded_when_the_customer_cancels_in_time(): void
@@ -265,7 +336,7 @@ class DepositTest extends TestCase
     /**
      * A Stripe event about the booking's Checkout Session, as Stripe sends it.
      */
-    private function event(string $id, string $type, Booking $booking): string
+    private function event(string $id, string $type, Booking $booking, ?int $amount = null): string
     {
         return (string) json_encode([
             'id' => $id,
@@ -274,8 +345,10 @@ class DepositTest extends TestCase
             'data' => ['object' => [
                 'id' => $booking->stripe_checkout_session_id,
                 'object' => 'checkout.session',
-                'payment_status' => $type === 'checkout.session.completed' ? 'paid' : 'unpaid',
-                'payment_intent' => $type === 'checkout.session.completed' ? 'pi_test_1' : null,
+                'payment_status' => $type === 'checkout.session.expired' ? 'unpaid' : 'paid',
+                'payment_intent' => $type === 'checkout.session.expired' ? null : 'pi_test_1',
+                'amount_total' => $amount ?? $booking->deposit_cents,
+                'currency' => 'eur',
                 'metadata' => ['booking_id' => (string) $booking->id],
             ]],
         ]);

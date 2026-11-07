@@ -80,6 +80,12 @@ class Booking extends Model
     public const PAYMENT_WINDOW_MINUTES = 30;
 
     /**
+     * How many bookings a customer may let lapse unpaid in 24 hours. Without
+     * a cap, unpaid holds could block popular times over and over.
+     */
+    public const UNPAID_LAPSES_PER_DAY = 3;
+
+    /**
      * @var array<string, mixed>
      */
     protected $attributes = [

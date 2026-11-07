@@ -17,7 +17,7 @@
             @foreach ([
                 ['label' => __('Bookings today'), 'value' => $todayCount],
                 ['label' => __('Next 7 days'), 'value' => $upcomingCount],
-                ['label' => __('Expected revenue this month'), 'value' => \Illuminate\Support\Number::currency($monthRevenueCents / 100, in: 'EUR', locale: 'it')],
+                ['label' => __('Expected revenue this month'), 'value' => \App\Models\Booking::formatCents($monthRevenueCents)],
                 ['label' => __('No-show rate, last 30 days'), 'value' => $noShowRate === null ? '—' : $noShowRate.'%'],
             ] as $stat)
                 <div class="rounded-xl border border-zinc-200 p-5 dark:border-zinc-700">

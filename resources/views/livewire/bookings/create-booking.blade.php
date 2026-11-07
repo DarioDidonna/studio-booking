@@ -82,7 +82,7 @@
                 @if ($this->takesDeposit)
                     <flux:text size="sm">
                         {{ __('You pay a :amount deposit by card on Stripe. It is taken off the bill, refunded if you cancel up to :hours hours before, and kept if you do not show up.', [
-                            'amount' => \Illuminate\Support\Number::currency(\App\Models\Booking::DEPOSIT_CENTS / 100, in: 'EUR', locale: 'it'),
+                            'amount' => \App\Models\Booking::formatCents(\App\Models\Booking::DEPOSIT_CENTS),
                             'hours' => \App\Models\Booking::FREE_CANCELLATION_HOURS,
                         ]) }}
                     </flux:text>
