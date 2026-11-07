@@ -185,17 +185,31 @@ class CreateBookingTest extends TestCase
             ->test(CreateBooking::class)
             ->set('serviceId', $service->id)
             ->assertSet('operatorId', null)
-            ->assertSee('Primo barbiere disponibile')
+            ->assertSee('Primo disponibile')
             ->set('operatorId', CreateBooking::ANY_OPERATOR)
             ->set('date', '2027-03-15')
             ->assertSee('09:30')
             ->assertSee('11:00')
             ->set('slot', '2027-03-15 10:00:00')
+            ->assertSee('Con '.$other->name)
             ->call('book')
             ->assertHasNoErrors()
             ->assertRedirect(route('bookings.index'));
 
         $this->assertDatabaseHas('bookings', ['customer_id' => $customer->id, 'operator_id' => $other->id]);
+    }
+
+    public function test_full_day_offers_the_next_day_with_free_times(): void
+    {
+        [$operator, $service] = $this->operatorOffering();
+
+        Livewire::actingAs(User::factory()->create())
+            ->test(CreateBooking::class)
+            ->set('serviceId', $service->id)
+            ->set('operatorId', $operator->id)
+            ->set('date', '2027-03-16')
+            ->assertSee('Nessun orario libero in questo giorno.')
+            ->assertSet('nextFreeDate', '2027-03-22');
     }
 
     public function test_customer_blocked_for_no_shows_sees_why_instead_of_the_form(): void

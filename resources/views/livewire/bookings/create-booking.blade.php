@@ -30,43 +30,63 @@
             </flux:radio.group>
 
             @if ($this->selectedService)
-                <div class="grid gap-6 sm:grid-cols-2">
-                    {{-- Keyed by service: a reused <select> would keep showing the operator of the previous service. --}}
-                    <flux:select wire:key="operator-select-{{ $serviceId }}" wire:model.live="operatorId" :label="__('With')" :placeholder="__('Choose who…')">
-                        @if ($this->operators->count() > 1)
-                            <flux:select.option wire:key="operator-any" :value="\App\Livewire\Bookings\CreateBooking::ANY_OPERATOR">{{ __('First available barber') }}</flux:select.option>
-                        @endif
-                        @foreach ($this->operators as $operator)
-                            <flux:select.option wire:key="operator-{{ $operator->id }}" :value="$operator->id">{{ $operator->name }}</flux:select.option>
-                        @endforeach
-                    </flux:select>
+                {{-- Keyed by service, so the choice of the previous service never lingers on screen. --}}
+                <flux:radio.group wire:key="operators-{{ $serviceId }}" wire:model.live="operatorId" :label="__('With')" variant="cards" class="flex-col sm:grid sm:grid-cols-3">
+                    @if ($this->operators->count() > 1)
+                        <flux:radio
+                            wire:key="operator-any"
+                            :value="\App\Livewire\Bookings\CreateBooking::ANY_OPERATOR"
+                            :label="__('First available')"
+                            :description="__('Whoever is free at that time')"
+                        />
+                    @endif
+                    @foreach ($this->operators as $operator)
+                        <flux:radio wire:key="operator-{{ $operator->id }}" :value="$operator->id" :label="$operator->name" />
+                    @endforeach
+                </flux:radio.group>
 
-                    <flux:input
-                        wire:model.live="date"
-                        type="date"
-                        :label="__('Day')"
-                        :min="now()->setTimezone(config('app.business_timezone'))->toDateString()"
-                        :max="now()->setTimezone(config('app.business_timezone'))->addDays(\App\Models\Booking::BOOKING_HORIZON_DAYS)->toDateString()"
-                    />
-                </div>
+                <flux:input
+                    wire:model.live="date"
+                    type="date"
+                    :label="__('Day')"
+                    class="max-w-xs"
+                    :min="now()->setTimezone(config('app.business_timezone'))->toDateString()"
+                    :max="now()->setTimezone(config('app.business_timezone'))->addDays(\App\Models\Booking::BOOKING_HORIZON_DAYS)->toDateString()"
+                />
             @endif
 
             @if ($operatorId !== null && $date)
                 {{-- $this->slot, not $slot: in a Livewire view Blade's $slot is a component's content. --}}
-                <x-free-times :slots="$this->availableSlots" :selected="$this->slot" target="operatorId,date" />
+                <x-free-times :slots="$this->availableSlots" :selected="$this->slot" :next-free-date="$this->nextFreeDate" target="operatorId,date" />
             @endif
 
             <flux:error name="operatorId" />
 
             @if ($this->selectedSlot)
+                @if ($this->assignedOperator)
+                    <flux:callout icon="user" color="amber">
+                        <flux:callout.heading>{{ __('With :operator', ['operator' => $this->assignedOperator->name]) }}</flux:callout.heading>
+                        <flux:callout.text>{{ __('The first barber free at :time.', ['time' => $this->selectedSlot->setTimezone(config('app.business_timezone'))->format('H:i')]) }}</flux:callout.text>
+                    </flux:callout>
+                @endif
+
                 <flux:textarea wire:model="notes" :label="__('Notes (optional)')" rows="2" />
 
-                <div class="flex items-center gap-4">
-                    <flux:button variant="primary" type="submit">{{ __('Confirm booking') }}</flux:button>
+                <div class="flex flex-wrap items-center gap-4">
+                    <flux:button variant="primary" type="submit">{{ $this->takesDeposit ? __('Confirm and pay the deposit') : __('Confirm booking') }}</flux:button>
                     <flux:text>
                         {{ $this->selectedService?->name }} · {{ $this->selectedSlot?->setTimezone(config('app.business_timezone'))->format('d/m/Y H:i') }}
                     </flux:text>
                 </div>
+
+                @if ($this->takesDeposit)
+                    <flux:text size="sm">
+                        {{ __('You pay a :amount deposit by card on Stripe. It is taken off the bill, refunded if you cancel up to :hours hours before, and kept if you do not show up.', [
+                            'amount' => \Illuminate\Support\Number::currency(\App\Models\Booking::DEPOSIT_CENTS / 100, in: 'EUR', locale: 'it'),
+                            'hours' => \App\Models\Booking::FREE_CANCELLATION_HOURS,
+                        ]) }}
+                    </flux:text>
+                @endif
             @endif
         </form>
     @endif

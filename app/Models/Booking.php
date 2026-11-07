@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Concerns\HasFormattedPrice;
 use App\Enums\BookingStatus;
+use App\Enums\DepositStatus;
 use Carbon\CarbonImmutable;
 use Database\Factories\BookingFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -23,6 +24,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property CarbonImmutable $ends_at
  * @property BookingStatus $status
  * @property int $price_cents
+ * @property int|null $deposit_cents
+ * @property DepositStatus|null $deposit_status
+ * @property string|null $stripe_checkout_session_id
+ * @property string|null $stripe_checkout_url
+ * @property string|null $stripe_payment_intent_id
+ * @property CarbonImmutable|null $payment_due_at
  * @property string|null $notes
  * @property CarbonImmutable|null $cancelled_at
  * @property CarbonImmutable|null $reminder_due_at
@@ -30,7 +37,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
  */
-#[Fillable(['customer_id', 'operator_id', 'service_id', 'starts_at', 'ends_at', 'status', 'price_cents', 'notes', 'cancelled_at', 'reminder_due_at', 'reminder_sent_at'])]
+#[Fillable(['customer_id', 'operator_id', 'service_id', 'starts_at', 'ends_at', 'status', 'price_cents', 'deposit_cents', 'deposit_status', 'stripe_checkout_session_id', 'stripe_checkout_url', 'stripe_payment_intent_id', 'payment_due_at', 'notes', 'cancelled_at', 'reminder_due_at', 'reminder_sent_at'])]
 class Booking extends Model
 {
     /** @use HasFactory<BookingFactory> */
@@ -62,6 +69,17 @@ class Booking extends Model
     public const NO_SHOW_LIMIT = 3;
 
     /**
+     * The deposit a customer pays when booking online, taken off the bill on the day.
+     */
+    public const DEPOSIT_CENTS = 500;
+
+    /**
+     * How long an unpaid online booking holds its slot. Stripe Checkout
+     * sessions cannot expire sooner than 30 minutes.
+     */
+    public const PAYMENT_WINDOW_MINUTES = 30;
+
+    /**
      * @var array<string, mixed>
      */
     protected $attributes = [
@@ -80,6 +98,9 @@ class Booking extends Model
             'ends_at' => 'datetime',
             'status' => BookingStatus::class,
             'price_cents' => 'integer',
+            'deposit_cents' => 'integer',
+            'deposit_status' => DepositStatus::class,
+            'payment_due_at' => 'datetime',
             'cancelled_at' => 'datetime',
             'reminder_due_at' => 'datetime',
             'reminder_sent_at' => 'datetime',

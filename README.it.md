@@ -64,6 +64,16 @@ Ogni data è salvata in UTC. Gli orari di lavoro sono ore "da orologio" nel fuso
 - L'orario del promemoria (`reminder_due_at`) si calcola al momento della prenotazione; chi prenota con meno di un giorno di anticipo non lo riceve.
 - Lo scheduler "prenota" ogni promemoria con un `UPDATE … WHERE reminder_sent_at IS NULL` prima di metterlo in coda, quindi esecuzioni sovrapposte non avvisano mai due volte lo stesso cliente. Un promemoria ancora in coda viene scartato se nel frattempo la prenotazione è stata annullata.
 
+### Caparra con Stripe
+
+Chi prenota online paga una caparra di 5 € con Stripe Checkout. Viene scalata dal conto, rimborsata se il cliente annulla in tempo o se annulla la barberia, e trattenuta se il cliente non si presenta. L'admin che prenota al banco non chiede caparra, e senza chiavi Stripe le caparre sono spente.
+
+- **"In attesa" tiene occupato l'orario.** La prenotazione nasce `pending` dentro la stessa transazione con blocco di tutte le altre, quindi l'orario non può essere venduto due volte mentre il cliente paga. La riserva dura 30 minuti, la scadenza minima consentita da Stripe Checkout.
+- **Conferma solo il webhook.** Il ritorno dalla pagina di pagamento può falsificarlo chiunque; un evento `checkout.session.completed` firmato no. La prenotazione viene confermata, e l'email parte, solo dal webhook.
+- **Ogni evento viene gestito una volta.** L'id dell'evento finisce in `stripe_webhook_events` nella stessa transazione che lo elabora: una consegna ripetuta viene ignorata, e un errore annulla entrambe le cose, così il nuovo tentativo di Stripe viene gestito.
+- **Liberata se non pagata.** `checkout.session.expired` libera l'orario; un comando pianificato fa lo stesso se l'evento non arriva. Un pagamento che arriva dopo che l'orario è stato liberato viene rimborsato in automatico.
+- **Rimborsi in coda e idempotenti.** Un job riprova con attese crescenti, e la sua chiave di idempotenza Stripe è legata alla prenotazione, quindi un nuovo tentativo non rimborsa mai due volte. I dati della carta non passano mai dall'applicazione: la pagina di pagamento è di Stripe.
+
 ### Scelte più piccole
 
 - **Prezzo copiato**: il prezzo viene salvato sulla prenotazione, così cambiare il listino non riscrive lo storico.
@@ -92,6 +102,21 @@ Apri http://localhost:8000. Tutti gli account demo hanno la password `password`:
 | `admin@example.com` | Admin |
 
 I promemoria richiedono lo scheduler: `php artisan schedule:work`.
+
+Per provare la caparra, metti in `.env` le chiavi Stripe **di test** e inoltra i webhook con la [Stripe CLI](https://docs.stripe.com/stripe-cli):
+
+```bash
+stripe listen --api-key "$(grep '^STRIPE_SECRET=' .env | cut -d= -f2)" --events checkout.session.completed,checkout.session.expired,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed --forward-to localhost:8000/stripe/webhook   # stampa il segreto whsec_…
+```
+
+`--api-key` fa ascoltare alla CLI lo stesso account Stripe della chiave nel `.env`; senza, la CLI ascolta l'account scelto con `stripe login`, e gli eventi non arrivano.
+
+```dotenv
+STRIPE_SECRET=sk_test_…
+STRIPE_WEBHOOK_SECRET=whsec_…
+```
+
+Paga con la carta di test `4242 4242 4242 4242`, una qualsiasi data futura e un CVC qualsiasi.
 
 ### Con Docker (Laravel Sail: app, MySQL 8.4, Mailpit)
 
@@ -156,7 +181,6 @@ tests/
 
 ## Limiti noti e prossimi passi
 
-- Lo stato `pending` è riservato a pagamenti online o approvazione manuale; oggi le prenotazioni vengono confermate subito.
 - L'admin sceglie il cliente da un elenco semplice; oltre qualche centinaio di clienti serve un campo di ricerca.
 - Non sono supportati orari di lavoro che iniziano nell'ora saltata dal cambio d'ora primaverile (02:00–03:00); uno studio non li ha mai.
 - Idee: lista d'attesa, statistiche per l'admin, esportazione CSV, link iCal per l'agenda dello staff.

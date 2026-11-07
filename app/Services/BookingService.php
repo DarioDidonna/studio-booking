@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\BookingStatus;
+use App\Enums\DepositStatus;
 use App\Exceptions\BookingCannotBeMovedException;
 use App\Exceptions\BookingNotStartedException;
 use App\Exceptions\CancellationWindowClosedException;
@@ -10,6 +11,7 @@ use App\Exceptions\InvalidBookingTransitionException;
 use App\Exceptions\SlotNotAvailableException;
 use App\Exceptions\TooManyNoShowsException;
 use App\Exceptions\TooManyOpenBookingsException;
+use App\Jobs\RefundDeposit;
 use App\Models\Booking;
 use App\Models\Operator;
 use App\Models\Service;
@@ -18,6 +20,7 @@ use App\Notifications\BookingCancelled;
 use App\Notifications\BookingConfirmed;
 use App\Notifications\BookingRescheduled;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 
@@ -43,6 +46,10 @@ class BookingService
      * their row is locked too, so two parallel requests cannot both pass the
      * limit. Customers with too many recent no-shows must book through the
      * barbershop. Admins booking at the desk are not limited.
+     *
+     * When deposits are on, a customer's own booking starts as pending: it
+     * holds the slot for a short payment window and is confirmed, with its
+     * email, only when Stripe reports the deposit paid.
      *
      * @throws SlotNotAvailableException
      * @throws TooManyOpenBookingsException
@@ -73,6 +80,8 @@ class BookingService
             }
 
             $reminderDueAt = $startsAt->utc()->subHours(Booking::REMINDER_HOURS);
+            $takesDeposit = $this->takesDeposit($bookedBy);
+            $status = $takesDeposit ? BookingStatus::Pending : BookingStatus::Confirmed;
 
             $booking = Booking::create([
                 'customer_id' => $customer->id,
@@ -80,19 +89,24 @@ class BookingService
                 'service_id' => $service->id,
                 'starts_at' => $startsAt->utc(),
                 'ends_at' => $startsAt->utc()->addMinutes($service->duration_minutes),
-                'status' => BookingStatus::Confirmed,
+                'status' => $status,
                 'price_cents' => $service->price_cents,
+                'deposit_cents' => $takesDeposit ? Booking::DEPOSIT_CENTS : null,
+                'deposit_status' => $takesDeposit ? DepositStatus::Unpaid : null,
+                'payment_due_at' => $takesDeposit ? Date::now()->addMinutes(Booking::PAYMENT_WINDOW_MINUTES) : null,
                 'notes' => $notes,
                 'reminder_due_at' => $reminderDueAt->isFuture() ? $reminderDueAt : null,
             ]);
 
             $booking->statusHistory()->create([
                 'from_status' => null,
-                'to_status' => BookingStatus::Confirmed,
+                'to_status' => $status,
                 'changed_by' => $bookedBy->id,
             ]);
 
-            $customer->notify(new BookingConfirmed($booking));
+            if (! $takesDeposit) {
+                $customer->notify(new BookingConfirmed($booking));
+            }
 
             return $booking;
         });
@@ -109,15 +123,7 @@ class BookingService
      */
     public function bookWithAnyOperator(User $customer, Service $service, CarbonImmutable $startsAt, User $bookedBy, ?string $notes = null): Booking
     {
-        $localDay = $startsAt->setTimezone(config('app.business_timezone'))->startOfDay();
-
-        $operators = $this->availability->operatorsOffering($service)
-            ->loadCount(['bookings' => fn ($query) => $query
-                ->whereIn('status', BookingStatus::slotOccupyingCases())
-                ->whereBetweenStarts($localDay, $localDay->addDay())])
-            ->sortBy('bookings_count');
-
-        foreach ($operators as $operator) {
+        foreach ($this->operatorsByPreference($service, $startsAt) as $operator) {
             try {
                 return $this->book($customer, $operator, $service, $startsAt, $bookedBy, $notes);
             } catch (SlotNotAvailableException) {
@@ -126,6 +132,34 @@ class BookingService
         }
 
         throw new SlotNotAvailableException;
+    }
+
+    /**
+     * Who "first available barber" would give the customer at that time, so the
+     * page can say it before they confirm. Same order as bookWithAnyOperator().
+     */
+    public function firstAvailableOperator(Service $service, CarbonImmutable $startsAt): ?Operator
+    {
+        return $this->operatorsByPreference($service, $startsAt)
+            ->first(fn (Operator $operator): bool => $this->isFreeSlot($operator, $service, $startsAt));
+    }
+
+    /**
+     * The operators offering the service, least busy that day first, so work
+     * is spread evenly. Ties keep the alphabetical order.
+     *
+     * @return EloquentCollection<int, Operator>
+     */
+    private function operatorsByPreference(Service $service, CarbonImmutable $startsAt): EloquentCollection
+    {
+        $localDay = $startsAt->setTimezone(config('app.business_timezone'))->startOfDay();
+
+        return $this->availability->operatorsOffering($service)
+            ->loadCount(['bookings' => fn ($query) => $query
+                ->whereIn('status', BookingStatus::slotOccupyingCases())
+                ->whereBetweenStarts($localDay, $localDay->addDay())])
+            ->sortBy('bookings_count')
+            ->values();
     }
 
     /**
@@ -174,6 +208,7 @@ class BookingService
      * Customers may cancel for free until the cancellation window closes;
      * admins may cancel at any time, for example when the studio closes.
      * The reason, when given, is included in the email to the customer.
+     * A paid deposit is refunded: the cancellation is within the rules.
      *
      * @throws CancellationWindowClosedException
      * @throws InvalidBookingTransitionException
@@ -186,8 +221,61 @@ class BookingService
 
         $cancelled = $this->transition($booking, BookingStatus::Cancelled, $cancelledBy);
         $cancelled->customer?->notify(new BookingCancelled($cancelled, $reason));
+        $this->refundDepositIfPaid($cancelled);
 
         return $cancelled;
+    }
+
+    /**
+     * Stripe reported the deposit paid. A booking still pending is confirmed.
+     * A payment that arrives after the booking was released, because the
+     * payment window ran out or the customer cancelled, is refunded.
+     * Repeated reports change nothing.
+     */
+    public function confirmDeposit(Booking $booking, string $paymentIntentId): Booking
+    {
+        $confirmed = DB::transaction(function () use ($booking, $paymentIntentId): Booking {
+            $locked = Booking::query()->whereKey($booking->id)->lockForUpdate()->firstOrFail();
+
+            if ($locked->deposit_status !== DepositStatus::Unpaid) {
+                return $locked;
+            }
+
+            $locked->update(['deposit_status' => DepositStatus::Paid, 'stripe_payment_intent_id' => $paymentIntentId]);
+
+            if ($locked->status !== BookingStatus::Pending) {
+                return $locked;
+            }
+
+            $locked->update(['status' => BookingStatus::Confirmed, 'payment_due_at' => null]);
+            $locked->statusHistory()->create([
+                'from_status' => BookingStatus::Pending,
+                'to_status' => BookingStatus::Confirmed,
+                'changed_by' => null,
+            ]);
+            $locked->customer?->notify(new BookingConfirmed($locked));
+
+            return $locked;
+        });
+
+        if ($confirmed->status === BookingStatus::Cancelled) {
+            $this->refundDepositIfPaid($confirmed);
+        }
+
+        return $confirmed;
+    }
+
+    /**
+     * The payment window ran out: the booking is released so the slot is free again.
+     *
+     * @throws InvalidBookingTransitionException
+     */
+    public function releaseUnpaid(Booking $booking): Booking
+    {
+        $released = $this->transition($booking, BookingStatus::Cancelled, null, onlyIf: fn (Booking $locked): bool => $locked->deposit_status === DepositStatus::Unpaid);
+        $released->customer?->notify(new BookingCancelled($released, __('The deposit was not paid in time, so the time has been released.')));
+
+        return $released;
     }
 
     /**
@@ -230,7 +318,7 @@ class BookingService
     {
         $this->ensureStarted($booking);
 
-        return $this->transition($booking, BookingStatus::Completed, $changedBy);
+        return $this->transition($booking, BookingStatus::Completed, $changedBy, settleDepositAs: DepositStatus::Applied);
     }
 
     /**
@@ -241,7 +329,7 @@ class BookingService
     {
         $this->ensureStarted($booking);
 
-        return $this->transition($booking, BookingStatus::NoShow, $changedBy);
+        return $this->transition($booking, BookingStatus::NoShow, $changedBy, settleDepositAs: DepositStatus::Kept);
     }
 
     /**
@@ -253,6 +341,22 @@ class BookingService
     {
         if ($booking->starts_at->isFuture()) {
             throw new BookingNotStartedException;
+        }
+    }
+
+    /**
+     * Customers booking online pay a deposit when Stripe is configured;
+     * admins booking at the desk never do.
+     */
+    private function takesDeposit(User $bookedBy): bool
+    {
+        return ! $bookedBy->isAdmin() && filled(config('services.stripe.secret'));
+    }
+
+    private function refundDepositIfPaid(Booking $booking): void
+    {
+        if ($booking->deposit_status === DepositStatus::Paid) {
+            RefundDeposit::dispatch($booking);
         }
     }
 
@@ -275,29 +379,34 @@ class BookingService
 
     /**
      * The booking row is locked and re-read, so two concurrent status changes
-     * cannot both pass the transition check.
+     * cannot both pass the transition check. A paid deposit is settled in the
+     * same step: taken off the bill, or kept after a no-show.
+     *
+     * @param  User|null  $changedBy  Null when the system acts, for example after a Stripe event.
+     * @param  (callable(Booking): bool)|null  $onlyIf  An extra check on the locked row.
      *
      * @throws InvalidBookingTransitionException
      */
-    private function transition(Booking $booking, BookingStatus $to, User $changedBy): Booking
+    private function transition(Booking $booking, BookingStatus $to, ?User $changedBy, ?DepositStatus $settleDepositAs = null, ?callable $onlyIf = null): Booking
     {
-        return DB::transaction(function () use ($booking, $to, $changedBy): Booking {
+        return DB::transaction(function () use ($booking, $to, $changedBy, $settleDepositAs, $onlyIf): Booking {
             $locked = Booking::query()->whereKey($booking->id)->lockForUpdate()->firstOrFail();
             $from = $locked->status;
 
-            if (! $from->canTransitionTo($to)) {
+            if (! $from->canTransitionTo($to) || ($onlyIf !== null && ! $onlyIf($locked))) {
                 throw new InvalidBookingTransitionException($from, $to);
             }
 
             $locked->update([
                 'status' => $to,
                 'cancelled_at' => $to === BookingStatus::Cancelled ? Date::now() : $locked->cancelled_at,
+                'deposit_status' => $settleDepositAs !== null && $locked->deposit_status === DepositStatus::Paid ? $settleDepositAs : $locked->deposit_status,
             ]);
 
             $locked->statusHistory()->create([
                 'from_status' => $from,
                 'to_status' => $to,
-                'changed_by' => $changedBy->id,
+                'changed_by' => $changedBy?->id,
             ]);
 
             return $locked;

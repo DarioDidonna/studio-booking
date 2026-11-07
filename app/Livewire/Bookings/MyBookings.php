@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Date;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 
 /**
@@ -21,6 +22,13 @@ use Livewire\Component;
 #[Title('My bookings')]
 class MyBookings extends Component
 {
+    /**
+     * Set by Stripe Checkout when it sends the customer back: "success" or "cancelled".
+     * Only used for a message; the payment itself is confirmed by Stripe's webhook.
+     */
+    #[Url]
+    public string $payment = '';
+
     /**
      * @return Collection<int, Booking>
      */

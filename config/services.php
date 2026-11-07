@@ -14,6 +14,15 @@ return [
     |
     */
 
+    /*
+     * Online bookings take a deposit through Stripe Checkout. Leave the secret
+     * empty to switch deposits off: bookings are then confirmed at once.
+     */
+    'stripe' => [
+        'secret' => env('STRIPE_SECRET'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+    ],
+
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],

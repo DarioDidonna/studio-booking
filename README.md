@@ -64,6 +64,16 @@ Every timestamp is stored in UTC. Working hours are wall-clock times in the busi
 - The reminder time (`reminder_due_at`) is computed when the booking is made; bookings made less than a day ahead get none.
 - The scheduler claims each reminder with a conditional `UPDATE … WHERE reminder_sent_at IS NULL` before queueing it, so overlapping runs never remind a customer twice. A reminder still waiting in the queue is dropped if the booking is cancelled in the meantime.
 
+### Deposits with Stripe
+
+A customer booking online pays a 5 € deposit through Stripe Checkout. It is taken off the bill, refunded if the customer cancels in time or the barbershop cancels, and kept after a no-show. Admins booking at the desk take no deposit, and without Stripe keys deposits are off entirely.
+
+- **Pending holds the slot.** The booking is created as `pending` inside the same locked transaction as any other booking, so the slot cannot be sold twice while the customer is paying. The hold lasts 30 minutes, the shortest expiry Stripe Checkout allows.
+- **Only the webhook confirms.** The redirect back from Checkout can be faked by anyone; a signed `checkout.session.completed` event cannot. The booking is confirmed, and its email sent, only from the webhook.
+- **Every event is handled once.** The event id is stored in `stripe_webhook_events` in the same transaction that acts on it: a repeated delivery is ignored, and a failure rolls both back so Stripe's retry is handled.
+- **Released if unpaid.** `checkout.session.expired` frees the slot; a scheduled command does the same if that event never arrives. A payment that arrives after the slot was released is refunded automatically.
+- **Refunds are queued and idempotent.** A job retries with backoff, and its Stripe idempotency key is tied to the booking, so a retry never refunds twice. The card data never touches the app: Checkout is hosted by Stripe.
+
 ### Smaller choices
 
 - **Price snapshot**: the price is copied onto the booking, so changing the catalogue never rewrites history.
@@ -92,6 +102,21 @@ Open http://localhost:8000. Every demo account uses the password `password`:
 | `admin@example.com` | Admin |
 
 Reminders need the scheduler: `php artisan schedule:work`.
+
+To try the deposit, put your Stripe **test** keys in `.env` and forward the webhooks with the [Stripe CLI](https://docs.stripe.com/stripe-cli):
+
+```bash
+stripe listen --api-key "$(grep '^STRIPE_SECRET=' .env | cut -d= -f2)" --events checkout.session.completed,checkout.session.expired,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed --forward-to localhost:8000/stripe/webhook   # prints the whsec_… secret
+```
+
+`--api-key` makes the CLI listen to the same Stripe account as the key in `.env`; without it, the CLI listens to whichever account `stripe login` chose, and the events never arrive.
+
+```dotenv
+STRIPE_SECRET=sk_test_…
+STRIPE_WEBHOOK_SECRET=whsec_…
+```
+
+Pay with the test card `4242 4242 4242 4242`, any future date and any CVC.
 
 ### With Docker (Laravel Sail: app, MySQL 8.4, Mailpit)
 
@@ -156,7 +181,6 @@ tests/
 
 ## Known limitations and next steps
 
-- The `pending` status is reserved for online payments or manual approval; today bookings are confirmed at once.
 - The admin picks the customer from a plain list; a searchable field is needed beyond a few hundred customers.
 - Working hours that start inside the hour skipped by the spring clock change (02:00–03:00) are not supported; a studio never has them.
 - Ideas: waiting list, statistics for the admin, CSV export, iCal links for the staff agenda.

@@ -44,6 +44,7 @@
                         @if ($booking->notes)
                             <flux:text size="sm" class="max-w-xs truncate">{{ $booking->notes }}</flux:text>
                         @endif
+                        <x-deposit-status :booking="$booking" />
                     </flux:table.cell>
                     <flux:table.cell>{{ $booking->service->name }}</flux:table.cell>
                     <flux:table.cell class="py-0"><x-booking-status-badge :status="$booking->status" /></flux:table.cell>

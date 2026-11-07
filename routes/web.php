@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\StripeWebhookController;
 use App\Livewire\Admin\Customers;
 use App\Livewire\Admin\EditOperator;
 use App\Livewire\Admin\Operators;
@@ -14,6 +15,8 @@ use App\Livewire\Staff\Agenda;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', HomeController::class)->name('home');
+
+Route::post('stripe/webhook', StripeWebhookController::class)->name('stripe.webhook');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('dashboard', DashboardController::class)->name('dashboard');

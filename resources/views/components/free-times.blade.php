@@ -2,6 +2,7 @@
     'slots',
     'selected' => '',
     'target' => 'date',
+    'nextFreeDate' => null,
 ])
 
 {{--
@@ -27,7 +28,16 @@
                 {{ $availableSlot->setTimezone(config('app.business_timezone'))->format('H:i') }}
             </flux:button>
         @empty
-            <flux:text class="col-span-full">{{ __('No free times on this day. Try another day.') }}</flux:text>
+            <div class="col-span-full flex flex-wrap items-center gap-3">
+                <flux:text>{{ __('No free times on this day.') }}</flux:text>
+                @if ($nextFreeDate)
+                    <flux:button size="sm" icon-trailing="arrow-right" wire:click="$set('date', '{{ $nextFreeDate }}')" type="button">
+                        {{ __('First free day: :day', ['day' => \Carbon\CarbonImmutable::parse($nextFreeDate)->translatedFormat('l j F')]) }}
+                    </flux:button>
+                @else
+                    <flux:text>{{ __('Try another day.') }}</flux:text>
+                @endif
+            </div>
         @endforelse
     </div>
 

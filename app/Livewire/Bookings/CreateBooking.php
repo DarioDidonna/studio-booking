@@ -2,7 +2,9 @@
 
 namespace App\Livewire\Bookings;
 
+use App\Enums\BookingStatus;
 use App\Enums\UserRole;
+use App\Exceptions\PaymentUnavailableException;
 use App\Exceptions\SlotNotAvailableException;
 use App\Exceptions\TooManyNoShowsException;
 use App\Exceptions\TooManyOpenBookingsException;
@@ -12,6 +14,7 @@ use App\Models\Service;
 use App\Models\User;
 use App\Services\AvailabilityService;
 use App\Services\BookingService;
+use App\Services\Payments\DepositService;
 use Carbon\CarbonImmutable;
 use Flux\Flux;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -31,6 +34,9 @@ use Livewire\Component;
  * @property-read CarbonImmutable|null $selectedSlot
  * @property-read EloquentCollection<int, User> $customers
  * @property-read bool $isBlockedForNoShows
+ * @property-read bool $takesDeposit
+ * @property-read string|null $nextFreeDate
+ * @property-read Operator|null $assignedOperator
  */
 #[Title('Book an appointment')]
 class CreateBooking extends Component
@@ -152,21 +158,44 @@ class CreateBooking extends Component
     #[Computed]
     public function availableSlots(): Collection
     {
-        if ($this->selectedService === null || ! $this->isValidDate($this->date)) {
-            return collect();
+        return $this->slotsOn($this->date);
+    }
+
+    /**
+     * When the chosen day is full, the next day with a free time, so the
+     * customer is not left guessing. Looks two weeks ahead at most.
+     */
+    #[Computed]
+    public function nextFreeDate(): ?string
+    {
+        if ($this->operatorId === null || ! $this->isValidDate($this->date) || $this->availableSlots->isNotEmpty()) {
+            return null;
         }
 
-        if ($this->operatorId === self::ANY_OPERATOR) {
-            return app(AvailabilityService::class)->availableSlotsWithAnyOperator($this->selectedService, $this->date, $this->operators);
+        $day = CarbonImmutable::createFromFormat('!Y-m-d', $this->date, config('app.business_timezone'));
+
+        foreach (range(1, 14) as $offset) {
+            $candidate = $day->addDays($offset)->toDateString();
+
+            if ($this->slotsOn($candidate)->isNotEmpty()) {
+                return $candidate;
+            }
         }
 
-        $operator = $this->operators->firstWhere('id', $this->operatorId);
+        return null;
+    }
 
-        if ($operator === null) {
-            return collect();
+    /**
+     * With "first available barber", who the customer would get at the chosen time.
+     */
+    #[Computed]
+    public function assignedOperator(): ?Operator
+    {
+        if ($this->operatorId !== self::ANY_OPERATOR || $this->selectedService === null || $this->selectedSlot === null) {
+            return null;
         }
 
-        return app(AvailabilityService::class)->availableSlots($operator, $this->selectedService, $this->date);
+        return app(BookingService::class)->firstAvailableOperator($this->selectedService, $this->selectedSlot);
     }
 
     #[Computed]
@@ -179,7 +208,16 @@ class CreateBooking extends Component
         return CarbonImmutable::createFromFormat('Y-m-d H:i:s', $this->slot, 'UTC');
     }
 
-    public function book(BookingService $bookingService): void
+    /**
+     * Whether confirming takes the customer to Stripe to pay the deposit.
+     */
+    #[Computed]
+    public function takesDeposit(): bool
+    {
+        return ! Auth::user()->isAdmin() && filled(config('services.stripe.secret'));
+    }
+
+    public function book(BookingService $bookingService, DepositService $deposits): void
     {
         $this->authorize('create', Booking::class);
 
@@ -225,6 +263,18 @@ class CreateBooking extends Component
             return;
         }
 
+        if ($booking->status === BookingStatus::Pending) {
+            try {
+                $this->redirect($deposits->startCheckout($booking)->url);
+            } catch (PaymentUnavailableException $exception) {
+                $this->reset('slot');
+                unset($this->availableSlots);
+                $this->addError('slot', $exception->getMessage());
+            }
+
+            return;
+        }
+
         if ($bookedBy->isAdmin()) {
             Flux::toast(variant: 'success', text: __('Booking confirmed. :name received an email with the details.', ['name' => $customer->name]));
             $this->redirectRoute('agenda', ['operator' => $booking->operator_id, 'date' => $this->date], navigate: true);
@@ -237,6 +287,28 @@ class CreateBooking extends Component
             : __('Booking confirmed. We sent you an email with the details.'));
 
         $this->redirectRoute('bookings.index', navigate: true);
+    }
+
+    /**
+     * @return Collection<int, CarbonImmutable>
+     */
+    private function slotsOn(string $date): Collection
+    {
+        if ($this->selectedService === null || ! $this->isValidDate($date)) {
+            return collect();
+        }
+
+        if ($this->operatorId === self::ANY_OPERATOR) {
+            return app(AvailabilityService::class)->availableSlotsWithAnyOperator($this->selectedService, $date, $this->operators);
+        }
+
+        $operator = $this->operators->firstWhere('id', $this->operatorId);
+
+        if ($operator === null) {
+            return collect();
+        }
+
+        return app(AvailabilityService::class)->availableSlots($operator, $this->selectedService, $date);
     }
 
     private function isValidDate(string $date): bool
