@@ -6,9 +6,28 @@
 
 Un sistema di prenotazioni per una barberia, con un aspetto da bottega classica. Il cliente prenota online un orario libero con il barbiere che preferisce, i barbieri vedono la propria agenda, l'admin gestisce listino, orari di lavoro e ferie. Il dominio è generico (servizi e operatori), quindi si adatta a qualsiasi attività su appuntamento.
 
-La parte interessante non è il CRUD ma le garanzie che ci stanno dietro: **nessuna doppia prenotazione con richieste simultanee**, **orari corretti anche al cambio dell'ora legale** ed **email inviate esattamente quando devono partire**.
+La parte interessante non è il CRUD ma le garanzie che ci stanno dietro: **nessuna doppia prenotazione con richieste simultanee**, **caparre confermate solo dai webhook firmati di Stripe**, **orari corretti anche al cambio dell'ora legale** ed **email inviate esattamente quando devono partire**.
 
-Realizzato con Laravel 13, Livewire 4, Flux UI e Tailwind CSS. PHP 8.4, MySQL o SQLite.
+Realizzato con Laravel 13, Livewire 4, Flux UI, Tailwind CSS e Stripe Checkout. PHP 8.4, MySQL o SQLite.
+
+## Screenshot
+
+Un cliente prenota con "Primo disponibile": la pagina dice quale barbiere gli toccherà prima che confermi e paghi la caparra di 5 € ([video](docs/screenshots/booking-flow.mp4)).
+
+![Percorso di prenotazione](docs/screenshots/booking-flow.gif)
+
+| | |
+|---|---|
+| ![Home](docs/screenshots/home.png) **Home**: prima il listino, poi gli orari calcolati dai turni dei barbieri | ![Prenotazione](docs/screenshots/booking.png) **Prenotazione**: solo orari liberi, e chi assegna "Primo disponibile" |
+| ![Le mie prenotazioni](docs/screenshots/my-bookings.png) **Le mie prenotazioni**: sposta o annulla entro 24 ore, stato della caparra | ![Dashboard](docs/screenshots/dashboard.png) **Dashboard admin**: appuntamenti di oggi e numeri chiave |
+| ![Agenda](docs/screenshots/agenda.png) **Agenda**: la giornata di un barbiere, completati e non presentati | ![Scheda cliente](docs/screenshots/customer.png) **Scheda cliente**: storico, spesa, blocco per assenze |
+
+<details>
+<summary>Telefono e login</summary>
+
+<img src="docs/screenshots/home-mobile.png" alt="Home su telefono" width="300"> <img src="docs/screenshots/login.png" alt="Login" width="500">
+
+</details>
 
 ## Cosa può fare ogni ruolo
 

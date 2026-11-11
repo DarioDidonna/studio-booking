@@ -6,9 +6,28 @@
 
 A booking system for a barbershop, with a classic barbershop look. Customers book a free time online with the barber they prefer, barbers see their agenda, and the admin manages the price list, the working hours and the holidays. The domain is generic (services and operators), so it fits any appointment-based business.
 
-The interesting part is not the CRUD but the guarantees behind it: **no double bookings under concurrent requests**, **correct times across daylight saving changes**, and **emails that are sent exactly when they should be**.
+The interesting part is not the CRUD but the guarantees behind it: **no double bookings under concurrent requests**, **deposits confirmed only by signed Stripe webhooks**, **correct times across daylight saving changes**, and **emails that are sent exactly when they should be**.
 
-Built with Laravel 13, Livewire 4, Flux UI and Tailwind CSS. PHP 8.4, MySQL or SQLite.
+Built with Laravel 13, Livewire 4, Flux UI, Tailwind CSS and Stripe Checkout. PHP 8.4, MySQL or SQLite.
+
+## Screenshots
+
+A customer books with "first available barber": the page says who they will get before they confirm and pay the 5 € deposit ([video](docs/screenshots/booking-flow.mp4)).
+
+![Booking flow](docs/screenshots/booking-flow.gif)
+
+| | |
+|---|---|
+| ![Home page](docs/screenshots/home.png) **Home**: price list first, opening hours computed from the barbers' shifts | ![Booking](docs/screenshots/booking.png) **Booking**: free times only, and who "first available" assigns |
+| ![My bookings](docs/screenshots/my-bookings.png) **My bookings**: move or cancel within 24 hours, deposit status | ![Dashboard](docs/screenshots/dashboard.png) **Admin dashboard**: today's appointments and key figures |
+| ![Agenda](docs/screenshots/agenda.png) **Agenda**: a barber's day, completed and no-show once started | ![Customer record](docs/screenshots/customer.png) **Customer record**: history, spending, no-show block |
+
+<details>
+<summary>Mobile and login</summary>
+
+<img src="docs/screenshots/home-mobile.png" alt="Home page on a phone" width="300"> <img src="docs/screenshots/login.png" alt="Login" width="500">
+
+</details>
 
 ## What each role can do
 
