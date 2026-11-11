@@ -1,6 +1,6 @@
 # Barberia Didonna
 
-[![Tests](https://github.com/DarioDidonna/studio-booking/actions/workflows/tests.yml/badge.svg)](https://github.com/DarioDidonna/studio-booking/actions/workflows/tests.yml)
+[![Tests](https://github.com/DarioDidonna/barbershop-booking/actions/workflows/tests.yml/badge.svg)](https://github.com/DarioDidonna/barbershop-booking/actions/workflows/tests.yml)
 
 [Read in English](README.md)
 
